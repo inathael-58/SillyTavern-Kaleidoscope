@@ -3,8 +3,8 @@ import {
     defaultPool, normalizePool, resolveLevels, newId, LEVELS,
 } from './engine.js';
 
-export const MODULE = 'north_star';
-export const META_KEY = 'north_star';
+export const MODULE = 'kaleidoscope';
+export const META_KEY = 'kaleidoscope';
 export const EXT_URL = new URL('.', import.meta.url).pathname.replace(/\/$/, '');
 
 const ST_BG_LOCK_KEY = 'custom_background';
@@ -18,8 +18,8 @@ export const log = [];
 export function note(kind, msg) {
     log.push(`${new Date().toLocaleTimeString()} ${kind} ${msg}`);
     if (log.length > 40) log.shift();
-    if (kind === 'error') console.error('[North Star]', msg);
-    else console.debug('[North Star]', kind, msg);
+    if (kind === 'error') console.error('[Kaleidoscope]', msg);
+    else console.debug('[Kaleidoscope]', kind, msg);
 }
 
 // ---------------------------------------------------------------- settings
@@ -389,7 +389,7 @@ export async function evaluate(trigger = 'refresh') {
 
         await apply(set, res?.level || '', { trigger, mode: res ? modeOf(res.level) : '' });
         if (set && s.notify && prevKey !== nextKey && trigger !== 'refresh') {
-            toastr.info(set.name, 'North Star', { timeOut: 2500 });
+            toastr.info(set.name, 'Kaleidoscope', { timeOut: 2500 });
         }
         note('ok', `${trigger} → ${res ? `${res.level}:${set?.name}` : 'ค่าปกติ'}`);
         return res;

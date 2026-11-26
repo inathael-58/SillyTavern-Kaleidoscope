@@ -1,5 +1,5 @@
 {
-    "display_name": "North Star",
+    "display_name": "Kaleidoscope",
     "loading_order": 100,
     "requires": [],
     "optional": [],
@@ -7,6 +7,6 @@
     "css": "style.css",
     "author": "inathael-58",
     "version": "1.0.0",
-    "homePage": "https://github.com/inathael-58/SillyTavern-North-Star",
+    "homePage": "https://github.com/inathael-58/SillyTavern-Kaleidoscope",
     "auto_update": true
 }

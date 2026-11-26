@@ -1,4 +1,4 @@
-// North Star — เซทธีม+BG ที่เลือกตามแชท › บอท › เวลา สำหรับ SillyTavern
+// Kaleidoscope — เซทธีม+BG ที่เลือกตามแชท › บอท › เวลา สำหรับ SillyTavern
 import {
     ctx, settings, normalizeAll, evaluate, preview, status, getSet, note, onCharacterRenamed,
 } from './core.js';
@@ -18,12 +18,12 @@ function startTick() {
 
 function addWandItem() {
     const menu = document.getElementById('extensionsMenu');
-    if (!menu || document.getElementById('nst_wand')) return;
+    if (!menu || document.getElementById('kls_wand')) return;
     const item = document.createElement('div');
-    item.id = 'nst_wand';
+    item.id = 'kls_wand';
     item.className = 'list-group-item flex-container flexGap5 interactable';
     item.tabIndex = 0;
-    item.innerHTML = '<div class="fa-solid fa-compass extensionsMenuExtensionButton"></div><span>North Star</span>';
+    item.innerHTML = '<div class="fa-solid fa-shapes extensionsMenuExtensionButton"></div><span>Kaleidoscope</span>';
     item.addEventListener('click', () => openManager());
     menu.appendChild(item);
 }
@@ -34,22 +34,22 @@ function registerCommands() {
     if (!SlashCommandParser || !SlashCommand) return;
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'ns-reroll',
+        name: 'kal-reroll',
         callback: async () => {
             const res = await evaluate('force');
             return res ? (getSet(res.setId)?.name || '') : '';
         },
-        helpString: 'North Star: สุ่มเซทใหม่ตามกติกาของแชท/บอท/เวลาที่ใช้อยู่ คืนชื่อเซทที่ได้',
+        helpString: 'Kaleidoscope: สุ่มเซทใหม่ตามกติกาของแชท/บอท/เวลาที่ใช้อยู่ คืนชื่อเซทที่ได้',
     }));
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'ns-set',
+        name: 'kal-set',
         callback: async (_args, value) => {
             const name = String(value ?? '').trim();
             if (!name) return status.setName || '';
             const sets = settings().sets;
             const set = sets.find(x => x.name === name) || sets.find(x => x.name.toLowerCase().includes(name.toLowerCase()));
-            if (!set) { toastr.warning(`ไม่พบเซท "${name}"`, 'North Star'); return ''; }
+            if (!set) { toastr.warning(`ไม่พบเซท "${name}"`, 'Kaleidoscope'); return ''; }
             await preview(set.id);
             return set.name;
         },
@@ -59,19 +59,19 @@ function registerCommands() {
             isRequired: false,
             enumProvider: () => settings().sets.map(x => new c.SlashCommandEnumValue(x.name)),
         })] : [],
-        helpString: 'North Star: ลองใช้เซทตามชื่อจนกว่าจะเข้าแชทใหม่ · ไม่ใส่ชื่อ = คืนชื่อเซทที่ใช้อยู่',
+        helpString: 'Kaleidoscope: ลองใช้เซทตามชื่อจนกว่าจะเข้าแชทใหม่ · ไม่ใส่ชื่อ = คืนชื่อเซทที่ใช้อยู่',
     }));
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'ns-open',
+        name: 'kal-open',
         callback: async () => { openManager(); return ''; },
-        helpString: 'North Star: เปิดหน้าจัดการเซท',
+        helpString: 'Kaleidoscope: เปิดหน้าจัดการเซท',
     }));
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'ns-debug',
+        name: 'kal-debug',
         callback: async () => diagnose(),
-        helpString: 'North Star: คืนรายงานตรวจสอบ (ใช้ส่งให้ผู้พัฒนาเมื่อมีปัญหา)',
+        helpString: 'Kaleidoscope: คืนรายงานตรวจสอบ (ใช้ส่งให้ผู้พัฒนาเมื่อมีปัญหา)',
     }));
 }
 
@@ -80,7 +80,7 @@ async function init() {
     settings();
     normalizeAll();
 
-    try { installThemePalette({ prefix: 'nst' }); } catch (err) { console.warn('[North Star] theme palette', err); }
+    try { installThemePalette({ prefix: 'kls' }); } catch (err) { console.warn('[Kaleidoscope] theme palette', err); }
 
     try { renderDrawer(); } catch (err) { note('error', `drawer: ${err?.stack || err}`); }
     try { addWandItem(); } catch (err) { note('error', `wand: ${err?.message || err}`); }
@@ -102,7 +102,7 @@ jQuery(async () => {
     try {
         await init();
     } catch (err) {
-        console.error('[North Star] init failed', err);
-        toastr.error(`North Star เริ่มทำงานไม่ได้: ${err?.message || err}`);
+        console.error('[Kaleidoscope] init failed', err);
+        toastr.error(`Kaleidoscope เริ่มทำงานไม่ได้: ${err?.message || err}`);
     }
 });

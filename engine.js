@@ -26,7 +26,7 @@ export const MODES = Object.freeze(['open', 'interval', 'daily', 'time']);
 export const LEVELS = Object.freeze(['chat', 'bot', 'time']);
 
 export function newId() {
-    return 'ns' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    return 'ks' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
 export function defaultPool(mode = 'daily') {
