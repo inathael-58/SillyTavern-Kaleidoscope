@@ -1,6 +1,6 @@
 // Kaleidoscope — เซทธีม+BG ที่เลือกตามแชท › บอท › เวลา สำหรับ SillyTavern
 import {
-    ctx, settings, normalizeAll, evaluate, preview, status, getSet, note, onCharacterRenamed,
+    ctx, settings, normalizeAll, migrateLegacySettings, evaluate, preview, status, getSet, note, onCharacterRenamed,
 } from './core.js';
 import { renderDrawer, openManager, diagnose, managerOpen } from './ui.js';
 import { installThemePalette } from './theme-palette.js';
@@ -77,8 +77,10 @@ function registerCommands() {
 
 async function init() {
     const c = ctx();
+    const migrated = migrateLegacySettings();
     settings();
     normalizeAll();
+    if (migrated) c.saveSettingsDebounced();
 
     try { installThemePalette({ prefix: 'kls' }); } catch (err) { console.warn('[Kaleidoscope] theme palette', err); }
 

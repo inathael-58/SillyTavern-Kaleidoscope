@@ -8,7 +8,7 @@ import {
 import { defaultEntry, describeWindow, newId } from './engine.js';
 import { pullLatest, serverVersion, compareVersions } from './updater.js';
 
-export const VERSION = '1.1.0';
+export const VERSION = '1.1.1';
 
 const DAY_NAMES = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 const LEVEL_LABEL = { chat: 'แชทนี้', bot: 'บอทนี้', time: 'ตามเวลา', preview: 'ลองใช้' };

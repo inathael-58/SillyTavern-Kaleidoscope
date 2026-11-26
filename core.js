@@ -39,6 +39,29 @@ const DEFAULTS = {
     appliedTheme: '',   // ธีมที่เราใส่ไว้ล่าสุด ('' = ไม่ได้ใส่)
 };
 
+// ชื่อเดิมก่อนเปลี่ยนเป็น Kaleidoscope (≤ 1.0.0) — ย้ายข้อมูลมาให้อัตโนมัติ
+const LEGACY_KEY = 'north_star';
+
+export function migrateLegacySettings() {
+    const all = ctx().extensionSettings;
+    if (all[LEGACY_KEY] && typeof all[LEGACY_KEY] === 'object' && !all[MODULE]) {
+        all[MODULE] = all[LEGACY_KEY];
+        delete all[LEGACY_KEY];
+        note('ok', 'ย้ายการตั้งค่าจาก North Star แล้ว');
+        return true;
+    }
+    return false;
+}
+
+function migrateChatMeta() {
+    const md = ctx().chatMetadata;
+    if (md?.[LEGACY_KEY] && !md[META_KEY]) {
+        md[META_KEY] = md[LEGACY_KEY];
+        delete md[LEGACY_KEY];
+        ctx().saveMetadataDebounced();
+    }
+}
+
 export function settings() {
     const all = ctx().extensionSettings;
     if (!all[MODULE] || typeof all[MODULE] !== 'object') all[MODULE] = {};
@@ -365,6 +388,7 @@ export async function evaluate(trigger = 'refresh') {
     const s = settings();
     if (!s.enabled) return null;
     try {
+        migrateChatMeta();
         const sc = scope();
         if (trigger === 'open') {
             const key = sc.chatKey || '(none)';
