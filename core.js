@@ -328,11 +328,23 @@ async function applyBg(set, level) {
     const base = stBaseBg();
     const own = setBgCss(set);
     // BG ที่ล็อกกับแชทด้วยปุ่มของ ST เอง ถือเป็นการกำหนดระดับแชท → ชนะเซทจากระดับบอท/เวลา
-    const blockedByLock = base.locked && s.respectChatBgLock && level !== 'chat' && level !== 'preview';
-    const url = own && !blockedByLock ? own : base.url;
-    if (url) $(el).css('background-image', url);
-    setFitting(own && !blockedByLock ? set.fitting : '');
+    const blockedByLock = !!own && base.locked && s.respectChatBgLock && level !== 'chat' && level !== 'preview';
+    const useOwn = !!own && !blockedByLock;
+    bgInfo.blockedByLock = blockedByLock;
+    if (useOwn) {
+        // !important: ธีมที่มี custom CSS แบบ #bg1 { background-image: … !important } จะทับ BG ของเซทไม่ได้
+        // (ST เขียน #bg1 ทีหลังได้ตามปกติ เพราะ jQuery .css เขียนทับค่า inline เดิม)
+        el.style.setProperty('background-image', own, 'important');
+    } else {
+        // คืนให้ ST/ธีมคุมตามเดิม — ล้าง !important ของเราออกก่อน
+        el.style.removeProperty('background-image');
+        if (base.url) el.style.backgroundImage = base.url;
+    }
+    setFitting(useOwn ? set.fitting : '');
 }
+
+/** ผลการใส่ BG ล่าสุด (ใช้แสดงสถานะ/ตรวจสอบ) */
+export const bgInfo = { blockedByLock: false };
 
 export const status = { level: '', setId: '', setName: '', mode: '', at: 0, trigger: '', note: '' };
 

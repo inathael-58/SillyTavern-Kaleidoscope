@@ -3,12 +3,12 @@ import {
     settings, save, ctx, scope, status, onStatus, evaluate, preview, rerollLevel, stateOf,
     getPool, ensurePool, savePool, clearPool, getSet, usageOf, removeSetEverywhere,
     listThemes, listBackgrounds, bgThumb, setBgCss, setFromCurrent, newSet, restoreBase,
-    log, note, EXT_URL, bgModuleLoaded,
+    log, note, EXT_URL, bgModuleLoaded, bgInfo,
 } from './core.js';
 import { defaultEntry, describeWindow, newId } from './engine.js';
 import { pullLatest, serverVersion, compareVersions } from './updater.js';
 
-export const VERSION = '1.1.0';
+export const VERSION = '1.2.0';
 
 const DAY_NAMES = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 const LEVEL_LABEL = { chat: 'แชทนี้', bot: 'บอทนี้', time: 'ตามเวลา', preview: 'ลองใช้' };
@@ -47,10 +47,11 @@ export function renderDrawer() {
 <div class="kls-settings" id="kls_settings">
   <div class="inline-drawer">
     <div class="inline-drawer-toggle inline-drawer-header">
-      <b>Kaleidoscope</b>
+      <b>Kaleidoscope <small class="kls-vertag" id="kls_vertag">v${VERSION}</small></b>
       <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
     </div>
     <div class="inline-drawer-content">
+     <div class="kls-drawer-body">
       <div class="kls-status" id="kls_status"></div>
       <div class="kls-actions">
         <div class="menu_button kls-btn" id="kls_open"><i class="fa-solid fa-shapes"></i><span>จัดการเซท</span></div>
@@ -66,11 +67,12 @@ export function renderDrawer() {
         <div class="menu_button kls-btn" id="kls_update"><i class="fa-solid fa-cloud-arrow-down"></i><span>ดึงเวอร์ชันล่าสุด</span></div>
         <div class="menu_button kls-btn" id="kls_diag"><i class="fa-solid fa-stethoscope"></i><span>ตรวจสอบ</span></div>
       </div>
-      <small class="kls-ver" id="kls_ver">v${VERSION}</small>
+      <small class="kls-ver" id="kls_ver" hidden></small>
       <div class="kls-diag" id="kls_diag_box" hidden>
         <textarea class="text_pole" id="kls_diag_text" rows="8" readonly></textarea>
         <div class="menu_button kls-btn" id="kls_diag_copy"><i class="fa-solid fa-copy"></i><span>คัดลอก</span></div>
       </div>
+     </div>
     </div>
   </div>
 </div>`;
@@ -118,15 +120,31 @@ export function renderDrawer() {
 }
 
 // ---------------------------------------------------------------- ดึงเวอร์ชัน
+/** บรรทัดสถานะเวอร์ชันใต้ปุ่ม ('' = ซ่อน) */
+function verLine(text, kind = '') {
+    $('#kls_ver')
+        .prop('hidden', !text)
+        .removeClass('kls-warn kls-bad')
+        .addClass(kind ? `kls-${kind}` : '')
+        .text(text);
+}
+
+let staleToastShown = false;
 async function checkVersion() {
     try {
         const server = await serverVersion();
         const stale = compareVersions(server, VERSION) !== 0;
-        $('#kls_ver')
+        $('#kls_vertag')
             .toggleClass('kls-warn', stale)
-            .text(stale
-                ? `v${VERSION} · บนเซิร์ฟเวอร์ v${server} · กด ดึงเวอร์ชันล่าสุด เพื่อโหลดตัวใหม่`
-                : `v${VERSION}`);
+            .text(stale ? `v${VERSION} → v${server}` : `v${VERSION}`)
+            .attr('title', stale ? `บนเซิร์ฟเวอร์เป็น v${server} แล้ว แต่หน้านี้ยังรัน v${VERSION}` : '');
+        verLine(stale ? `ติดตั้ง v${server} ไว้แล้ว แต่หน้านี้ยังรัน v${VERSION} · กด ดึงเวอร์ชันล่าสุด` : '', stale ? 'warn' : '');
+        if (stale && !staleToastShown) {
+            staleToastShown = true;
+            toastr.info(`ติดตั้ง v${server} ไว้แล้ว แต่หน้านี้ยังรัน v${VERSION} · แตะเพื่อโหลดตัวใหม่`, 'Kaleidoscope', {
+                timeOut: 0, extendedTimeOut: 0, closeButton: true, onclick: () => onUpdateClick(),
+            });
+        }
     } catch { /* ออฟไลน์ ก็แสดงแค่เวอร์ชันที่รันอยู่ */ }
 }
 
@@ -136,21 +154,22 @@ async function onUpdateClick() {
     updating = true;
     const $btn = $('#kls_update');
     $btn.addClass('disabled').find('span').text('กำลังดึง…');
-    $('#kls_ver').removeClass('kls-warn kls-bad').text(`v${VERSION} · กำลังตรวจหาเวอร์ชันใหม่…`);
+    verLine('กำลังตรวจหาเวอร์ชันใหม่…');
     try {
         const res = await pullLatest(VERSION);
         if (!res.needsReload) {
-            $('#kls_ver').text(`v${VERSION} · เป็นเวอร์ชันล่าสุดแล้ว`);
+            verLine(`v${VERSION} เป็นเวอร์ชันล่าสุดแล้ว`);
             toastr.success(`เป็นเวอร์ชันล่าสุดแล้ว (v${VERSION})`, 'Kaleidoscope');
             return;
         }
         const what = `v${res.to}${res.commit ? ` (${res.commit})` : ''}`;
-        $('#kls_ver').text(`ดึง ${what} แล้ว · โหลดหน้าใหม่เพื่อใช้งาน`);
+        $('#kls_vertag').addClass('kls-warn').text(`v${VERSION} → v${res.to}`);
+        verLine(`ดึง ${what} แล้ว · โหลดหน้าใหม่เพื่อใช้งาน`, 'warn');
         const c = ctx();
         const ok = await c.Popup.show.confirm('ดึงเวอร์ชันใหม่แล้ว', `Kaleidoscope ${what} · โหลดหน้าใหม่ตอนนี้เลยไหม`, { okButton: 'โหลดหน้าใหม่', cancelButton: 'ไว้ทีหลัง' });
         if (ok === c.POPUP_RESULT.AFFIRMATIVE) location.reload();
     } catch (err) {
-        $('#kls_ver').addClass('kls-bad').text(`v${VERSION} · ${err?.message || err}`);
+        verLine(String(err?.message || err), 'bad');
         toastr.error(String(err?.message || err), 'Kaleidoscope');
     } finally {
         updating = false;
@@ -165,7 +184,8 @@ export function statusText() {
     if (status.level === 'preview') return `กำลังลองเซท <b>${esc(status.setName)}</b> · กลับเป็นปกติเมื่อเข้าแชทใหม่`;
     if (!status.setId) return 'ไม่มีกติกาที่ตรงกับตอนนี้ · ใช้ธีมและ BG ปกติ';
     const mode = status.mode ? ` · ${MODE_LABEL[status.mode] || status.mode}` : '';
-    return `ใช้อยู่: <b>${esc(status.setName)}</b><br><span class="kls-muted">จาก${LEVEL_LABEL[status.level] || status.level}${mode}</span>`;
+    const lock = bgInfo.blockedByLock ? '<br><span class="kls-muted">BG ของแชทนี้ถูกล็อกไว้ด้วยปุ่มของ ST จึงใช้ BG ที่ล็อกแทน (ปิด “เคารพ BG ที่ล็อกกับแชท” ถ้าอยากให้เซทชนะ)</span>' : '';
+    return `ใช้อยู่: <b>${esc(status.setName)}</b><br><span class="kls-muted">จาก${LEVEL_LABEL[status.level] || status.level}${mode}</span>${lock}`;
 }
 
 function updateDrawer() {
@@ -656,7 +676,8 @@ export async function diagnose() {
     }
     lines.push(`status: level=${status.level || '-'} set=${status.setName || '-'} trigger=${status.trigger}`);
     lines.push(`theme: current=${c.powerUserSettings?.theme} base=${s.baseTheme} applied=${s.appliedTheme || '-'} themes=${listThemes().length}`);
-    lines.push(`bg1: ${bg1 ? bg1.style.backgroundImage || '(none)' : 'missing'} class=${bg1?.className || ''}`);
+    lines.push(`bg1: ${bg1 ? bg1.style.backgroundImage || '(none)' : 'missing'} ${bg1?.style.getPropertyPriority('background-image') || ''} class=${bg1?.className || ''}`);
+    if (bg1) lines.push(`bg1 computed: ${getComputedStyle(bg1).backgroundImage} · blockedByLock=${bgInfo.blockedByLock}`);
     lines.push(`st lock: ${c.chatMetadata?.custom_background || '-'} · bgModule=${bgModuleLoaded()}`);
     lines.push('log:');
     lines.push(...log.slice(-20).map(x => '  ' + x));

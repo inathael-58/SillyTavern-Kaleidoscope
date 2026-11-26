@@ -87,9 +87,16 @@ async function init() {
     try { registerCommands(); } catch (err) { note('error', `commands: ${err?.message || err}`); }
 
     const ev = c.eventTypes || c.event_types;
-    c.eventSource.on(ev.CHAT_CHANGED, () => evaluate('open'));
+    // ST โหลด extension ก่อนลงทะเบียนตัวจัดการ BG ของตัวเอง ตัวของ ST จึงทำงานทีหลังเรา
+    // แล้วเขียน #bg1 กลับเป็น BG ปกติ/BG ที่ล็อก (ธีมไม่โดนเพราะ ST ไม่แตะธีมตอนเปลี่ยนแชท)
+    // → ย้ายตัวเราไปท้ายคิวตอน APP_READY และรอให้ตัวอื่นในคิวเดียวกันทำงานเสร็จก่อนค่อยใส่เซท
+    const onChatChanged = () => { setTimeout(() => evaluate('open'), 0); };
+    c.eventSource.on(ev.CHAT_CHANGED, onChatChanged);
     if (ev.CHARACTER_RENAMED) c.eventSource.on(ev.CHARACTER_RENAMED, onCharacterRenamed);
-    c.eventSource.on(ev.APP_READY, () => evaluate('open'));
+    c.eventSource.on(ev.APP_READY, () => {
+        try { c.eventSource.makeLast?.(ev.CHAT_CHANGED, onChatChanged); } catch (err) { note('warn', `makeLast: ${err?.message || err}`); }
+        evaluate('open');
+    });
 
     // กลับมาที่แท็บหลังจากทิ้งไว้นาน → ถือเป็นการตรวจเวลาแบบ tick (ไม่สุ่มใหม่ถ้าแชทยังเปิดอยู่)
     document.addEventListener('visibilitychange', () => {
