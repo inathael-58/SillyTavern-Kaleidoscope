@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     resolveIds, resolveLevels, periodAt, forPeriod, bucketFor, parseHM, dayNightReady,
-    normalizeRule, normalizeBound, migrateGlobal, nearestHours, defaultRule,
+    normalizeRule, normalizeBound, migrateGlobal, nearestHours, defaultRule, classifyOpen,
 } from '../engine.js';
 
 const at = (h, m = 0, day = 26) => new Date(2026, 10, day, h, m); // 26 พ.ย. 2026
@@ -188,6 +188,25 @@ test('migrating the v1 time-level pool into the rule', () => {
     assert.equal(migrateGlobal({ mode: 'interval', intervalMin: 180, entries: [{ setId: 'a' }] }).rule.hours, 1);
     assert.equal(nearestHours(300), 6);
     assert.equal(migrateGlobal({ mode: 'time', entries: [{ setId: 'a' }] }).rule.mode, 'open');
+});
+
+test('only entering a different chat counts as opening a chat', () => {
+    // โหลดหน้า ไปหน้าแรก (ไม่มีแชท) → ไม่สุ่ม
+    let r = classifyOpen('', null, 'A');
+    assert.equal(r.trigger, 'refresh');
+    // โหลดหน้าแล้ว ST เปิดแชทเดิมให้ → ไม่สุ่ม
+    assert.equal(classifyOpen('A', null, 'A').trigger, 'refresh');
+    // จากหน้าแรกเข้าแชท (แม้เป็นแชทเดิม) → สุ่ม
+    r = classifyOpen('A', r.lastOpened, r.remember);
+    assert.equal(r.trigger, 'open');
+    // CHAT_CHANGED ซ้ำของแชทเดิม (เปลี่ยนชื่อ ฯลฯ) → ไม่สุ่ม
+    assert.equal(classifyOpen('A', r.lastOpened, r.remember).trigger, 'refresh');
+    // เปลี่ยนไปแชทอื่น → สุ่ม และจำแชทใหม่ไว้
+    r = classifyOpen('B', r.lastOpened, r.remember);
+    assert.deepEqual([r.trigger, r.remember], ['open', 'B']);
+    // หน้าแรก → กลับแชท B → สุ่ม
+    r = classifyOpen('', r.lastOpened, r.remember);
+    assert.equal(classifyOpen('B', r.lastOpened, r.remember).trigger, 'open');
 });
 
 // ---------------------------------------------------------------- release hygiene

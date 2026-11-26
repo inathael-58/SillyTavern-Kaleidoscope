@@ -170,6 +170,22 @@ export function resolveLevels(levels, opts = {}) {
     return null;
 }
 
+/**
+ * CHAT_CHANGED / APP_READY นับเป็น "เปิดแชท" (สุ่มใหม่ได้) ไหม
+ * ST ส่ง CHAT_CHANGED ตอนกลับหน้าแรก (ไม่มีแชท), ตอนโหลดหน้าแล้วเปิดแชทเดิมให้, ตอนเปลี่ยนชื่อแชท ฯลฯ ด้วย
+ * → นับเฉพาะตอนเข้าแชทที่ต่างจากแชทที่เปิดอยู่ก่อนหน้า
+ * @param {string} chatKey แชทที่เปิดอยู่ตอนนี้ ('' = ไม่มี)
+ * @param {string|null} lastOpened แชทก่อนหน้าในหน้านี้ (null = เพิ่งโหลดหน้า, '' = อยู่หน้าแรก)
+ * @param {string} remembered แชทล่าสุดที่จำไว้ข้ามการโหลดหน้า
+ * @returns {{ trigger: 'open'|'refresh', lastOpened: string, remember: string }}
+ */
+export function classifyOpen(chatKey, lastOpened, remembered = '') {
+    if (!chatKey) return { trigger: 'refresh', lastOpened: '', remember: remembered };
+    const prev = lastOpened ?? remembered ?? '';
+    if (chatKey === prev) return { trigger: 'refresh', lastOpened: chatKey, remember: remembered };
+    return { trigger: 'open', lastOpened: chatKey, remember: chatKey };
+}
+
 // ---------------------------------------------------------------- normalize / ย้ายข้อมูลเก่า
 export function normalizeRule(rule) {
     const out = { ...defaultRule(), ...(rule && typeof rule === 'object' ? rule : {}) };
