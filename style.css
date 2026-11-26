@@ -36,11 +36,20 @@ html.kls-pal :where(#kls_settings, .kls-popup) :is(.text_pole, textarea, input):
     max-width: 100%;
     overflow-wrap: anywhere;
 }
-.kls-settings .inline-drawer-content {
+/* ห้ามตั้ง display ให้ .inline-drawer-content เอง — ST ซ่อน/แสดงลิ้นชักด้วย display ของตัวนี้
+   (ถ้าทับเป็น flex ลิ้นชักจะเปิดค้างตลอด) → จัด layout ที่ตัวลูกแทน */
+.kls-drawer-body {
     display: flex;
     flex-direction: column;
     gap: 6px;
 }
+.kls-vertag {
+    font-weight: normal;
+    font-size: 0.8em;
+    opacity: 0.7;
+    margin-left: 3px;
+}
+.kls-vertag.kls-warn { color: var(--kls-p-warn, inherit); opacity: 1; }
 .kls-status {
     padding: 8px 10px;
     border: 1px solid var(--SmartThemeBorderColor);
@@ -79,6 +88,8 @@ html.kls-pal :where(#kls_settings, .kls-popup) :is(.text_pole, textarea, input):
 .kls-ver.kls-warn { color: var(--kls-p-warn, inherit); opacity: 1; }
 .kls-ver.kls-bad { color: var(--kls-p-danger, inherit); opacity: 1; }
 .kls-diag { display: flex; flex-direction: column; gap: 6px; }
+/* display ของคลาสทับ [hidden] ของเบราว์เซอร์ → บังคับซ่อนคืน */
+:is(#kls_settings, .kls-mgr) [hidden] { display: none !important; }
 .kls-diag textarea { font-family: monospace; font-size: 0.85em; width: 100%; }
 .kls-diag .kls-btn { align-self: flex-start; }
 
