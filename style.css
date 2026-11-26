@@ -1,0 +1,355 @@
+/* North Star — ปุ่มเป็นแคปซูล, การ์ด 12, ช่องกรอก 6, ป้ายวัน 4 (ห้ามใช้ radius ตัวเลขอื่น) */
+:root {
+    --nst-r-pill: 999px;
+    --nst-r-card: 12px;
+    --nst-r-ctl: 6px;
+    --nst-r-tag: 4px;
+}
+
+/* ---------------------------------------------------------------- สีที่อ่านออกบนทุกธีม (theme-palette.js) */
+html.nst-pal :is(#nst_settings, .nst-popup) {
+    --SmartThemeBlurTintColor: var(--nst-p-surface);
+    --SmartThemeBodyColor: var(--nst-p-fg);
+    --SmartThemeQuoteColor: var(--nst-p-accent-text);
+    --SmartThemeEmColor: var(--nst-p-em);
+    --SmartThemeUnderlineColor: var(--nst-p-underline);
+    --SmartThemeBorderColor: var(--nst-p-line);
+}
+html.nst-pal .nst-popup {
+    background-color: var(--nst-p-surface);
+    color: var(--nst-p-fg);
+    backdrop-filter: none;
+}
+html.nst-pal :where(#nst_settings, .nst-popup) :is(.text_pole, textarea, select, input:is([type="text"], [type="search"], [type="number"], [type="url"], [type="time"], :not([type]))) {
+    background-color: var(--nst-p-surface2);
+    color: var(--nst-p-fg);
+    border-color: var(--nst-p-line);
+}
+html.nst-pal :where(#nst_settings, .nst-popup) :is(.text_pole, textarea, input)::placeholder {
+    color: var(--nst-p-muted);
+    opacity: 1;
+}
+
+/* ---------------------------------------------------------------- แผงใน Extensions */
+.nst-settings {
+    contain: inline-size;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+}
+.nst-settings .inline-drawer-content {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.nst-status {
+    padding: 8px 10px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: var(--nst-r-ctl);
+    line-height: 1.5;
+}
+.nst-actions,
+.nst-foot,
+.nst-toolbar,
+.nst-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+.nst-foot { justify-content: space-between; }
+.nst-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    width: auto;
+    margin: 0;
+    border-radius: var(--nst-r-pill);
+    padding: 4px 12px;
+    white-space: nowrap;
+}
+.nst-btn:active { transform: scale(0.97); }
+.nst-hint {
+    display: block;
+    opacity: 0.8;
+    line-height: 1.4;
+    margin-top: -2px;
+}
+.nst-muted { color: var(--nst-p-muted, inherit); opacity: 0.9; }
+.nst-ver { opacity: 0.7; }
+.nst-diag { display: flex; flex-direction: column; gap: 6px; }
+.nst-diag textarea { font-family: monospace; font-size: 0.85em; width: 100%; }
+.nst-diag .nst-btn { align-self: flex-start; }
+
+/* ---------------------------------------------------------------- หน้าจัดการ */
+.nst-mgr {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    text-align: left;
+    overflow-wrap: anywhere;
+    min-width: 0;
+}
+.nst-mgr-head {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.nst-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 3px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: var(--nst-r-pill);
+}
+.nst-tab {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 6px 4px;
+    border: 0;
+    border-radius: var(--nst-r-pill);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.nst-tab.active {
+    background: var(--nst-p-accent, var(--SmartThemeQuoteColor));
+    color: var(--nst-p-on-accent, var(--SmartThemeBodyColor));
+}
+.nst-now {
+    padding: 8px 10px;
+    border-radius: var(--nst-r-ctl);
+    background: var(--nst-p-accent-soft, transparent);
+    line-height: 1.5;
+}
+.nst-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+.nst-ctx { display: flex; flex-direction: column; gap: 2px; }
+.nst-subhead {
+    margin-top: 6px;
+    font-weight: bold;
+    display: flex;
+    flex-direction: column;
+}
+.nst-subhead small { font-weight: normal; }
+
+.nst-empty,
+.nst-error {
+    padding: 14px;
+    border: 1px dashed var(--SmartThemeBorderColor);
+    border-radius: var(--nst-r-card);
+    line-height: 1.6;
+    text-align: center;
+}
+.nst-empty .nst-toolbar { justify-content: center; margin-top: 8px; }
+.nst-error { border-style: solid; border-color: var(--nst-p-danger, currentColor); }
+
+/* แถว label + control: control ใช้ basis 0 / width 0 เพื่อไม่ให้ตัวเลือกยาวดันความกว้าง (WebKit) */
+.nst-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.nst-row > span:first-child {
+    flex: 1 1 0;
+    min-width: 0;
+}
+.nst-row > :is(select, input, .nst-linkbtn) {
+    flex: 2 1 0;
+    width: 0;
+    min-width: 0;
+    margin: 0;
+}
+.nst-row.nst-time > input { flex: 1 1 0; }
+.nst-row .nst-sep { flex: 0 0 auto; }
+.nst-dim { opacity: 0.6; }
+
+.nst-linkbtn {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: var(--nst-p-accent-text, var(--SmartThemeQuoteColor));
+    text-decoration: underline;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.nst-iconbtn {
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--nst-r-pill);
+    border: 1px solid var(--SmartThemeBorderColor);
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+.nst-iconbtn:active { transform: scale(0.97); }
+
+.nst-cards,
+.nst-entries {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.nst-card,
+.nst-entry {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: var(--nst-r-card);
+    background: var(--nst-p-surface2, transparent);
+    min-width: 0;
+}
+.nst-card.is-active,
+.nst-entry.is-active {
+    border-color: var(--nst-p-accent, var(--SmartThemeQuoteColor));
+    box-shadow: inset 3px 0 0 var(--nst-p-accent, var(--SmartThemeQuoteColor));
+}
+.nst-card-top {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    min-width: 0;
+}
+.nst-card-main {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.nst-card-main .text_pole { margin: 0; width: 100%; }
+.nst-thumb {
+    flex: 0 0 auto;
+    width: 84px;
+    height: 56px;
+    border-radius: var(--nst-r-ctl);
+    border: 1px solid var(--SmartThemeBorderColor);
+    background-color: var(--nst-p-surface, transparent);
+    background-size: cover;
+    background-position: center;
+    color: inherit;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+}
+.nst-thumb.is-empty { opacity: 0.7; }
+.nst-details summary { cursor: pointer; }
+.nst-details[open] { display: flex; flex-direction: column; gap: 4px; }
+.nst-details .text_pole { margin: 4px 0 0; }
+.nst-danger { color: var(--nst-p-danger, inherit); }
+
+.nst-days {
+    display: flex;
+    gap: 4px;
+}
+.nst-day {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 4px 0;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: var(--nst-r-tag);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 0.9em;
+    cursor: pointer;
+}
+.nst-day.on {
+    background: var(--nst-p-accent, var(--SmartThemeQuoteColor));
+    border-color: var(--nst-p-accent, var(--SmartThemeQuoteColor));
+    color: var(--nst-p-on-accent, var(--SmartThemeBodyColor));
+}
+
+.nst-pool-foot {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 8px;
+    border-top: 1px solid var(--SmartThemeBorderColor);
+}
+
+/* ---------------------------------------------------------------- เลือก BG */
+.nst-view-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.nst-view-title {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.nst-bgfilter > input { flex: 2 1 0; }
+.nst-bgfilter > select { flex: 1 1 0; }
+.nst-bggrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 8px;
+}
+.nst-bggrid > .nst-empty,
+.nst-bggrid > .nst-error { grid-column: 1 / -1; }
+.nst-bgitem {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: var(--nst-r-ctl);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 0.85em;
+    cursor: pointer;
+    min-width: 0;
+}
+.nst-bgitem:active { transform: scale(0.97); }
+.nst-bgitem.is-picked {
+    border-color: var(--nst-p-accent, var(--SmartThemeQuoteColor));
+    box-shadow: 0 0 0 2px var(--nst-p-accent, var(--SmartThemeQuoteColor));
+}
+.nst-bgimg {
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    object-fit: cover;
+    border-radius: var(--nst-r-tag);
+    display: grid;
+    place-items: center;
+    background: var(--nst-p-surface, transparent);
+}
+.nst-bgname {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- motion */
+:is(.nst-btn, .nst-iconbtn, .nst-bgitem) {
+    transition: transform var(--animation-duration, 125ms) cubic-bezier(0.23, 1, 0.32, 1);
+}
+body.reduced-motion :is(.nst-mgr, #nst_settings) *,
+body.reduced-motion :is(.nst-mgr, #nst_settings) {
+    animation: none !important;
+    transition: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+    :is(.nst-mgr, #nst_settings),
+    :is(.nst-mgr, #nst_settings) * { animation: none !important; }
+}

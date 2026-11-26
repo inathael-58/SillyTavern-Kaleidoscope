@@ -1,0 +1,12 @@
+{
+    "display_name": "North Star",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "inathael-58",
+    "version": "1.0.0",
+    "homePage": "https://github.com/inathael-58/SillyTavern-North-Star",
+    "auto_update": true
+}
