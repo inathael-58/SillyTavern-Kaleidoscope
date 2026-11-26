@@ -1,137 +1,193 @@
 // node --test tests/
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolvePool, resolveLevels, activeStart, bucketFor, normalizePool, parseHM } from '../engine.js';
+import {
+    resolveIds, resolveLevels, periodAt, forPeriod, bucketFor, parseHM, dayNightReady,
+    normalizeRule, normalizeBound, migrateGlobal, nearestHours, defaultRule,
+} from '../engine.js';
 
-const at = (h, m = 0, day = 26) => new Date(2026, 10, day, h, m); // พฤ. 26 พ.ย. 2026
-const pool = (mode, entries, extra = {}) => normalizePool({ mode, entries, ...extra });
-const seq = (...xs) => { let i = 0; return () => xs[i++ % xs.length]; };
+const at = (h, m = 0, day = 26) => new Date(2026, 10, day, h, m); // 26 พ.ย. 2026
+const DN = { day: '06:00', night: '18:00' };
+const TAGS = { d1: 'day', d2: 'day', n1: 'night', n2: 'night', b1: '', b2: '' };
+const tagOf = (id) => TAGS[id] || '';
+const rule = (extra = {}) => normalizeRule({ ...defaultRule(), ...extra });
+const opts = (o = {}) => ({ tagOf, period: periodAt(o.dn ?? DN, o.now ?? at(10)), now: at(10), trigger: 'open', ...o });
 
 test('parseHM', () => {
     assert.equal(parseHM('06:30'), 390);
-    assert.equal(parseHM('24:00'), 1440);
     assert.equal(parseHM(''), null);
-    assert.equal(parseHM('25:00'), null);
+    assert.equal(parseHM('24:00'), null);
 });
 
-test('time window: normal, overnight, days', () => {
-    const night = { setId: 'a', from: '22:00', to: '06:00', days: [] };
-    assert.notEqual(activeStart(night, at(23)), null);
-    assert.notEqual(activeStart(night, at(2)), null);
-    assert.equal(activeStart(night, at(12)), null);
-    // 02:00 วันพฤ. เป็นรอบที่เริ่ม 22:00 วันพุธ
-    assert.equal(new Date(activeStart(night, at(2))).getDate(), 25);
-    const wedNight = { ...night, days: [3] };
-    assert.notEqual(activeStart(wedNight, at(2)), null); // คืนวันพุธ
-    assert.equal(activeStart(wedNight, at(23)), null);   // คืนวันพฤ.
-    assert.equal(activeStart({ setId: 'a', from: '', to: '', days: [] }, at(5)), 0);
-    assert.equal(activeStart({ setId: 'a', from: '', to: '', days: [0] }, at(5)), null);
+test('day/night: unset or equal times = not ready', () => {
+    assert.equal(dayNightReady({ day: '', night: '18:00' }), false);
+    assert.equal(dayNightReady({ day: '06:00', night: '06:00' }), false);
+    assert.equal(periodAt({ day: '', night: '' }, at(10)), null);
+    assert.equal(dayNightReady(DN), true);
 });
 
-test('open mode re-rolls on open, keeps on refresh, avoids repeat', () => {
-    const p = pool('open', [{ setId: 'a' }, { setId: 'b' }]);
-    const r1 = resolvePool(p, null, { now: at(10), trigger: 'open', rng: () => 0 });
-    assert.equal(r1.setId, 'a');
-    const r2 = resolvePool(p, r1.state, { now: at(10), trigger: 'refresh' });
-    assert.equal(r2.setId, 'a');
+test('day/night periods, including the overnight wrap', () => {
+    assert.equal(periodAt(DN, at(10)).period, 'day');
+    assert.equal(periodAt(DN, at(18)).period, 'night');
+    assert.equal(periodAt(DN, at(3)).period, 'night');
+    // ตี 3 วันที่ 26 อยู่ในกลางคืนที่เริ่ม 18:00 วันที่ 25
+    assert.equal(periodAt(DN, at(3)).start, at(18, 0, 25).getTime());
+    // ผู้ใช้ตั้งกลางวันข้ามเที่ยงคืนก็ได้ (เช่นคนทำงานกะดึก)
+    const odd = { day: '20:00', night: '08:00' };
+    assert.equal(periodAt(odd, at(23)).period, 'day');
+    assert.equal(periodAt(odd, at(10)).period, 'night');
+});
+
+test('forPeriod: both day and night bound → follows time', () => {
+    const p = periodAt(DN, at(20));
+    const r = forPeriod(['d1', 'n1'], tagOf, p);
+    assert.deepEqual(r.ids, ['n1']);
+    assert.equal(r.aware, true);
+    assert.equal(r.missing, '');
+});
+
+test('forPeriod: only day sets bound → uses them at night too and reports missing night', () => {
+    const r = forPeriod(['d1', 'd2'], tagOf, periodAt(DN, at(20)));
+    assert.deepEqual(r.ids, ['d1', 'd2']);
+    assert.equal(r.aware, false);
+    assert.equal(r.missing, 'night');
+});
+
+test('forPeriod: "both" sets count for day and night', () => {
+    const night = forPeriod(['d1', 'b1'], tagOf, periodAt(DN, at(20)));
+    assert.deepEqual(night.ids, ['b1']);
+    assert.equal(night.missing, '');
+    const untagged = forPeriod(['b1', 'b2'], tagOf, periodAt(DN, at(20)));
+    assert.equal(untagged.aware, false);
+    assert.equal(untagged.missing, '');
+});
+
+test('forPeriod: time not set → no filtering (time rule off)', () => {
+    const r = forPeriod(['d1', 'n1'], tagOf, null);
+    assert.deepEqual(r.ids, ['d1', 'n1']);
+    assert.equal(r.aware, false);
+});
+
+test('open mode: re-rolls on open, keeps on refresh, avoids repeat', () => {
+    const r = rule({ mode: 'open' });
+    const r1 = resolveIds(['b1', 'b2'], null, opts({ rule: r, rng: () => 0 }));
+    assert.equal(r1.setId, 'b1');
+    const r2 = resolveIds(['b1', 'b2'], r1.state, opts({ rule: r, trigger: 'refresh' }));
     assert.equal(r2.rolled, false);
-    const r3 = resolvePool(p, r1.state, { now: at(10), trigger: 'open', rng: () => 0 });
-    assert.equal(r3.setId, 'b'); // noRepeat
+    const r3 = resolveIds(['b1', 'b2'], r1.state, opts({ rule: r, rng: () => 0 }));
+    assert.equal(r3.setId, 'b2');
 });
 
-test('interval mode: same hour keeps, next hour re-rolls on open only', () => {
-    const p = pool('interval', [{ setId: 'a' }, { setId: 'b' }], { intervalMin: 60 });
-    const r1 = resolvePool(p, null, { now: at(10, 5), trigger: 'open', rng: () => 0 });
-    const r2 = resolvePool(p, r1.state, { now: at(10, 55), trigger: 'open', rng: () => 0.9 });
-    assert.equal(r2.setId, r1.setId);
+test('interval buckets start at 0:00 on the real clock', () => {
+    const r6 = rule({ mode: 'interval', hours: 6 });
+    assert.equal(bucketFor(r6, at(0, 0)), bucketFor(r6, at(5, 59)));
+    assert.notEqual(bucketFor(r6, at(5, 59)), bucketFor(r6, at(6, 0)));
+    const r24 = rule({ mode: 'interval', hours: 24 });
+    assert.equal(bucketFor(r24, at(0, 1)), bucketFor(r24, at(23, 59)));
+    assert.notEqual(bucketFor(r24, at(23, 59)), bucketFor(r24, at(0, 0, 27)));
+});
+
+test('interval: same slot keeps on open, next slot re-rolls on open but not on tick', () => {
+    const r = rule({ mode: 'interval', hours: 1 });
+    const ids = ['b1', 'b2'];
+    const r1 = resolveIds(ids, null, opts({ rule: r, now: at(10, 5), rng: () => 0 }));
+    const r2 = resolveIds(ids, r1.state, opts({ rule: r, now: at(10, 55), rng: () => 0.9 }));
     assert.equal(r2.rolled, false);
-    // แชทเปิดค้างข้ามชั่วโมง → tick ไม่เปลี่ยน
-    const r3 = resolvePool(p, r1.state, { now: at(11, 5), trigger: 'tick', rng: () => 0.9 });
-    assert.equal(r3.setId, r1.setId);
-    // เข้าแชทใหม่หลังข้ามชั่วโมง → สุ่มใหม่ (และไม่ซ้ำ)
-    const r4 = resolvePool(p, r1.state, { now: at(11, 5), trigger: 'open', rng: () => 0 });
+    const tick = resolveIds(ids, r1.state, opts({ rule: r, now: at(11, 5), trigger: 'tick', rng: () => 0.9 }));
+    assert.equal(tick.setId, r1.setId); // ข้ามรอบธรรมดา → รอเปิดแชทครั้งถัดไป
+    const refresh = resolveIds(ids, r1.state, opts({ rule: r, now: at(11, 5), trigger: 'refresh' }));
+    assert.equal(refresh.setId, r1.setId);
+    const r4 = resolveIds(ids, r1.state, opts({ rule: r, now: at(11, 5), rng: () => 0 }));
     assert.equal(r4.rolled, true);
     assert.notEqual(r4.setId, r1.setId);
 });
 
-test('interval buckets align to the clock (every 3h)', () => {
-    const p = pool('interval', [{ setId: 'a' }], { intervalMin: 180 });
-    assert.equal(bucketFor(p, at(0, 10), []), bucketFor(p, at(2, 59), []));
-    assert.notEqual(bucketFor(p, at(2, 59), []), bucketFor(p, at(3, 0), []));
-});
-
-test('daily mode with day start hour', () => {
-    const p = pool('daily', [{ setId: 'a' }, { setId: 'b' }], { dayStartHour: 4 });
-    const r1 = resolvePool(p, null, { now: at(23), trigger: 'open', rng: () => 0 });
-    const r2 = resolvePool(p, r1.state, { now: at(3, 0, 27), trigger: 'open', rng: () => 0.9 });
-    assert.equal(r2.setId, r1.setId); // ยังไม่ถึงตี 4 = วันเดิม
-    const r3 = resolvePool(p, r1.state, { now: at(4, 0, 27), trigger: 'open', rng: () => 0 });
+test('interval 12h + day/night: changes at slot edges and at day/night edges', () => {
+    const r = rule({ mode: 'interval', hours: 12, byDayNight: true });
+    const ids = ['d1', 'd2', 'n1', 'n2'];
+    const o = (h, extra = {}) => opts({ rule: r, useTags: true, now: at(h), period: periodAt(DN, at(h)), ...extra });
+    const r1 = resolveIds(ids, null, o(13, { rng: () => 0 }));
+    assert.equal(TAGS[r1.setId], 'day');
+    // 17:00 ยังรอบเดียวกัน กลางวันเดียวกัน → คงไว้
+    assert.equal(resolveIds(ids, r1.state, o(17)).rolled, false);
+    // 19:00 ยังรอบ 12:00–24:00 แต่เข้ากลางคืนแล้ว → เปิดแชทได้เซทกลางคืน
+    const r2 = resolveIds(ids, r1.state, o(19, { rng: () => 0 }));
+    assert.equal(TAGS[r2.setId], 'night');
+    // ตี 1 รอบใหม่ (00:00) กลางคืนเดิม → สุ่มเซทกลางคืนใหม่
+    const r3 = resolveIds(ids, r2.state, opts({ rule: r, useTags: true, now: at(1, 0, 27), period: periodAt(DN, at(1, 0, 27)), rng: () => 0 }));
     assert.equal(r3.rolled, true);
+    assert.equal(TAGS[r3.setId], 'night');
 });
 
-test('time mode picks by window and falls through when nothing matches', () => {
-    const p = pool('time', [
-        { setId: 'day', from: '06:00', to: '18:00' },
-        { setId: 'night', from: '18:00', to: '06:00' },
-    ]);
-    assert.equal(resolvePool(p, null, { now: at(9) }).setId, 'day');
-    assert.equal(resolvePool(p, null, { now: at(20) }).setId, 'night');
-    const partial = pool('time', [{ setId: 'night', from: '20:00', to: '23:00' }]);
-    assert.equal(resolvePool(partial, null, { now: at(9) }), null);
+test('interval 24h + day/night: one day set and one night set per day', () => {
+    const r = rule({ mode: 'interval', hours: 24, byDayNight: true });
+    const ids = ['d1', 'd2', 'n1', 'n2'];
+    const o = (h, extra = {}) => opts({ rule: r, useTags: true, now: at(h), period: periodAt(DN, at(h)), ...extra });
+    const day = resolveIds(ids, null, o(9, { rng: () => 0 }));
+    assert.equal(resolveIds(ids, day.state, o(15)).setId, day.setId);
+    const night = resolveIds(ids, day.state, o(20, { rng: () => 0 }));
+    assert.equal(TAGS[night.setId], 'night');
 });
 
-test('time mode switches on tick (live) but random modes do not', () => {
-    const p = pool('time', [{ setId: 'day', from: '06:00', to: '18:00' }, { setId: 'night', from: '18:00', to: '06:00' }]);
-    const r1 = resolvePool(p, null, { now: at(17, 59), trigger: 'open' });
-    const r2 = resolvePool(p, r1.state, { now: at(18, 0), trigger: 'tick' });
-    assert.equal(r2.setId, 'night');
-    assert.equal(r2.changed, true);
+test('tick (live switch) changes only when crossing day/night', () => {
+    const r = rule({ mode: 'open' });
+    const ids = ['d1', 'n1'];
+    const r1 = resolveIds(ids, null, opts({ rule: r, useTags: true, now: at(17, 59), period: periodAt(DN, at(17, 59)) }));
+    assert.equal(r1.setId, 'd1');
+    const same = resolveIds(ids, r1.state, opts({ rule: r, useTags: true, trigger: 'tick', now: at(17, 59), period: periodAt(DN, at(17, 59)) }));
+    assert.equal(same.rolled, false);
+    const cross = resolveIds(ids, r1.state, opts({ rule: r, useTags: true, trigger: 'tick', now: at(18, 0), period: periodAt(DN, at(18, 0)) }));
+    assert.equal(cross.setId, 'n1');
+    assert.equal(cross.changed, true);
 });
 
-test('time mode with overlapping entries stays stable within the window', () => {
-    const p = pool('time', [{ setId: 'a', from: '20:00', to: '23:00' }, { setId: 'b', from: '20:00', to: '23:00' }]);
-    const r1 = resolvePool(p, null, { now: at(20, 10), trigger: 'open', rng: () => 0 });
-    const r2 = resolvePool(p, r1.state, { now: at(22, 0), trigger: 'open', rng: () => 0.99 });
+test('tick never re-rolls a list that does not split by day/night', () => {
+    const r = rule({ mode: 'open' });
+    const r1 = resolveIds(['d1', 'd2'], null, opts({ rule: r, useTags: true, now: at(17, 59), period: periodAt(DN, at(17, 59)), rng: () => 0 }));
+    const r2 = resolveIds(['d1', 'd2'], r1.state, opts({ rule: r, useTags: true, trigger: 'tick', now: at(18, 0), period: periodAt(DN, at(18, 0)), rng: () => 0.9 }));
     assert.equal(r2.setId, r1.setId);
-    const r3 = resolvePool(p, r1.state, { now: at(20, 10, 27), trigger: 'open', rng: () => 0.99 });
-    assert.equal(r3.rolled, true); // คืนถัดไปคือรอบใหม่
 });
 
-test('weights', () => {
-    const p = pool('open', [{ setId: 'a', weight: 1 }, { setId: 'b', weight: 3 }], { noRepeat: false });
-    assert.equal(resolvePool(p, null, { rng: () => 0.2 }).setId, 'a');
-    assert.equal(resolvePool(p, null, { rng: () => 0.3 }).setId, 'b');
-    const zero = pool('open', [{ setId: 'a', weight: 0 }, { setId: 'b', weight: 1 }]);
-    for (const r of [0, 0.5, 0.99]) assert.equal(resolvePool(zero, null, { rng: () => r }).setId, 'b');
-});
-
-test('priority chat > bot > time, with fall-through', () => {
-    const chat = pool('time', [{ setId: 'c', from: '20:00', to: '23:00' }]);
-    const bot = pool('daily', [{ setId: 'b' }]);
-    const time = pool('time', [{ setId: 't' }]);
+test('priority: chat beats bot beats the random rule, always', () => {
+    const r = rule({ mode: 'open', byDayNight: true });
     const levels = [
-        { level: 'chat', pool: chat, state: null },
-        { level: 'bot', pool: bot, state: null },
-        { level: 'time', pool: time, state: null },
+        { level: 'chat', ids: ['d1'], state: null, useTags: true },
+        { level: 'bot', ids: ['n1'], state: null, useTags: true },
+        { level: 'rule', ids: ['b1'], state: null, useTags: true },
     ];
-    assert.equal(resolveLevels(levels, { now: at(21) }).level, 'chat');
-    assert.equal(resolveLevels(levels, { now: at(9) }).level, 'bot');
-    const noBot = levels.filter(l => l.level !== 'bot');
-    assert.equal(resolveLevels(noBot, { now: at(9) }).setId, 't');
-    const disabled = [{ level: 'chat', pool: { ...chat, enabled: false }, state: null }, levels[2]];
-    assert.equal(resolveLevels(disabled, { now: at(21) }).level, 'time');
+    // กลางคืน แต่แชทผูกแค่เซทกลางวัน → แชทยังชนะ
+    const night = opts({ rule: r, now: at(22), period: periodAt(DN, at(22)) });
+    assert.equal(resolveLevels(levels, night).setId, 'd1');
+    assert.equal(resolveLevels(levels.slice(1), night).setId, 'n1');
+    assert.equal(resolveLevels([{ ...levels[0], ids: [] }, ...levels.slice(1)], night).level, 'bot');
+    assert.equal(resolveLevels(levels.slice(2), night).level, 'rule');
+    assert.equal(resolveLevels([], night), null);
 });
 
-test('deleted sets are ignored', () => {
-    const p = pool('open', [{ setId: 'gone' }, { setId: 'a' }]);
-    const r = resolvePool(p, { setId: 'gone', bucket: 'open' }, { trigger: 'refresh', validIds: new Set(['a']) });
-    assert.equal(r.setId, 'a');
-    assert.equal(resolvePool(pool('open', [{ setId: 'gone' }]), null, { validIds: new Set() }), null);
+test('random rule ignores tags unless byDayNight is on', () => {
+    const r = rule({ mode: 'open' });
+    const ids = ['d1', 'n1'];
+    const at22 = { now: at(22), period: periodAt(DN, at(22)) };
+    const plain = resolveLevels([{ level: 'rule', ids, state: null, useTags: false }], opts({ rule: r, ...at22, rng: () => 0 }));
+    assert.equal(plain.setId, 'd1');
+    const tagged = resolveLevels([{ level: 'rule', ids, state: null, useTags: true }], opts({ rule: r, ...at22, rng: () => 0 }));
+    assert.equal(tagged.setId, 'n1');
 });
 
-test('tick never lets a random-mode level start deciding mid-chat', () => {
-    const p = pool('interval', [{ setId: 'a', from: '20:00', to: '23:00' }]);
-    assert.equal(resolvePool(p, null, { now: at(20, 1), trigger: 'tick' }), null);
+test('normalizeBound accepts v1 pools and drops duplicates and old fields', () => {
+    const b = normalizeBound({ enabled: false, mode: 'time', entries: [{ setId: 'a', weight: 3, from: '06:00' }, { setId: 'a' }, { setId: 'b' }, null] });
+    assert.deepEqual(b, { enabled: false, entries: [{ setId: 'a' }, { setId: 'b' }] });
+});
+
+test('migrating the v1 time-level pool into the rule', () => {
+    assert.equal(migrateGlobal(null).rule.enabled, false);
+    assert.equal(migrateGlobal(null).inRandom, null);
+    const daily = migrateGlobal({ mode: 'daily', entries: [{ setId: 'a' }, { setId: 'z', weight: 0 }] });
+    assert.deepEqual([daily.rule.mode, daily.rule.hours, daily.rule.enabled], ['interval', 24, true]);
+    assert.deepEqual([...daily.inRandom], ['a']);
+    assert.equal(migrateGlobal({ mode: 'interval', intervalMin: 180, entries: [{ setId: 'a' }] }).rule.hours, 1);
+    assert.equal(nearestHours(300), 6);
+    assert.equal(migrateGlobal({ mode: 'time', entries: [{ setId: 'a' }] }).rule.mode, 'open');
 });
 
 // ---------------------------------------------------------------- release hygiene

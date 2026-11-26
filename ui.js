@@ -2,28 +2,37 @@
 import {
     settings, save, ctx, scope, status, onStatus, evaluate, preview, rerollLevel, stateOf,
     getPool, ensurePool, savePool, clearPool, getSet, usageOf, removeSetEverywhere,
+    timeReady, currentPeriod, boundMissing, randomIds, tagOf,
     listThemes, listBackgrounds, bgThumb, setBgCss, setFromCurrent, newSet, restoreBase,
     log, note, EXT_URL, bgModuleLoaded, bgInfo,
 } from './core.js';
-import { defaultEntry, describeWindow, newId } from './engine.js';
+import { newId, HOURS } from './engine.js';
 import { pullLatest, serverVersion, compareVersions } from './updater.js';
 
-export const VERSION = '1.2.0';
+export const VERSION = '1.3.0';
 
-const DAY_NAMES = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
-const LEVEL_LABEL = { chat: 'แชทนี้', bot: 'บอทนี้', time: 'ตามเวลา', preview: 'ลองใช้' };
-const MODE_LABEL = {
-    open: 'ทุกครั้งที่เปิดแชท',
-    interval: 'ตามรอบเวลา',
-    daily: 'รายวัน',
-    time: 'ตามช่วงเวลา',
-};
-const MODE_HINT = {
-    open: 'สุ่มเซทใหม่ทุกครั้งที่เข้าแชท',
-    interval: 'สุ่มใหม่เมื่อข้ามรอบ (นับตามนาฬิกา เช่นทุกชั่วโมงตรง) · ไม่เปลี่ยนระหว่างที่แชทยังเปิดค้าง จะเปลี่ยนตอนเข้าแชทครั้งถัดไป',
-    daily: 'สุ่มวันละครั้ง · ทั้งวันใช้เซทเดิม',
-    time: 'ใช้เซทตามช่วงเวลาที่ตั้งในแต่ละรายการ · ถ้าหลายรายการตรงเวลาเดียวกันจะสุ่มครั้งเดียวต่อรอบ · นอกช่วงเวลาจะส่งต่อให้ระดับถัดไป',
-};
+const LEVEL_LABEL = { chat: 'แชทนี้', bot: 'บอทนี้', rule: 'กฎสุ่ม', preview: 'ลองใช้' };
+const TAG_LABEL = { '': 'ทั้งคู่', day: 'กลางวัน', night: 'กลางคืน' };
+const TAG_ICON = { '': 'fa-circle-half-stroke', day: 'fa-sun', night: 'fa-moon' };
+const PERIOD_LABEL = { day: 'กลางวัน', night: 'กลางคืน' };
+
+function modeLabel(mode) {
+    if (!mode) return '';
+    if (mode === 'open') return 'สุ่มทุกครั้งที่เปิดแชท';
+    const h = Number(String(mode).split(':')[1]) || 6;
+    return `ทุก ${h} ชม.`;
+}
+
+function ruleFreqText() {
+    const r = settings().rule;
+    return r.mode === 'interval' ? `ทุก ${r.hours} ชม. (นับจาก 0:00)` : 'สุ่มใหม่ทุกครั้งที่เปิดแชท';
+}
+
+function dnRangeText() {
+    const dn = settings().dayNight;
+    return `กลางวัน ${dn.day}–${dn.night} · กลางคืน ${dn.night}–${dn.day}`;
+}
+
 const FIT_LABEL = { '': 'ตามที่ตั้งใน ST', cover: 'เต็มจอ (cover)', contain: 'พอดีภาพ (contain)', stretch: 'ยืด (stretch)', center: 'กลางจอ (center)', classic: 'คลาสสิก' };
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -59,9 +68,7 @@ export function renderDrawer() {
       </div>
       <label class="checkbox_label"><input type="checkbox" id="kls_enabled"><span>เปิดใช้ Kaleidoscope</span></label>
       <label class="checkbox_label"><input type="checkbox" id="kls_lock"><span>เคารพ BG ที่ล็อกกับแชท</span></label>
-      <small class="kls-hint">BG ที่ล็อกด้วยปุ่มล็อกของ ST ชนะเซทจากระดับบอทและเวลา แต่แพ้เซทที่กำหนดให้แชทนี้</small>
-      <label class="checkbox_label"><input type="checkbox" id="kls_live"><span>เปลี่ยนตามช่วงเวลาทันที</span></label>
-      <small class="kls-hint">เฉพาะโหมด "ตามช่วงเวลา" · ถ้าปิดไว้ จะเปลี่ยนตอนเข้าแชทครั้งถัดไป</small>
+      <small class="kls-hint">BG ที่ล็อกด้วยปุ่มล็อกของ ST ชนะเซทจากบอทและกฎสุ่ม แต่แพ้เซทที่ผูกกับแชทนี้</small>
       <label class="checkbox_label"><input type="checkbox" id="kls_notify"><span>แจ้งเตือนเมื่อเปลี่ยนเซท</span></label>
       <div class="kls-foot">
         <div class="menu_button kls-btn" id="kls_update"><i class="fa-solid fa-cloud-arrow-down"></i><span>ดึงเวอร์ชันล่าสุด</span></div>
@@ -88,9 +95,6 @@ export function renderDrawer() {
     });
     $root.find('#kls_lock').prop('checked', s.respectChatBgLock).on('change', function () {
         s.respectChatBgLock = this.checked; save(); refreshSoon();
-    });
-    $root.find('#kls_live').prop('checked', s.liveTime).on('change', function () {
-        s.liveTime = this.checked; save();
     });
     $root.find('#kls_notify').prop('checked', s.notify).on('change', function () {
         s.notify = this.checked; save();
@@ -183,7 +187,7 @@ export function statusText() {
     if (!s.sets.length) return 'ยังไม่มีเซท · กด จัดการเซท เพื่อเริ่ม';
     if (status.level === 'preview') return `กำลังลองเซท <b>${esc(status.setName)}</b> · กลับเป็นปกติเมื่อเข้าแชทใหม่`;
     if (!status.setId) return 'ไม่มีกติกาที่ตรงกับตอนนี้ · ใช้ธีมและ BG ปกติ';
-    const mode = status.mode ? ` · ${MODE_LABEL[status.mode] || status.mode}` : '';
+    const mode = (status.mode ? ` · ${modeLabel(status.mode)}` : '') + (status.period ? ` · ${PERIOD_LABEL[status.period]}` : '');
     const lock = bgInfo.blockedByLock ? '<br><span class="kls-muted">BG ของแชทนี้ถูกล็อกไว้ด้วยปุ่มของ ST จึงใช้ BG ที่ล็อกแทน (ปิด “เคารพ BG ที่ล็อกกับแชท” ถ้าอยากให้เซทชนะ)</span>' : '';
     return `ใช้อยู่: <b>${esc(status.setName)}</b><br><span class="kls-muted">จาก${LEVEL_LABEL[status.level] || status.level}${mode}</span>${lock}`;
 }
@@ -203,7 +207,8 @@ export async function openManager(tab) {
     const c = ctx();
     if (ui.popup) return;
     ui.tab = tab || lsGet('kls_tab', 'sets');
-    if (!['sets', 'chat', 'bot', 'time'].includes(ui.tab)) ui.tab = 'sets';
+    if (ui.tab === 'time') ui.tab = 'rule';
+    if (!['sets', 'chat', 'bot', 'rule'].includes(ui.tab)) ui.tab = 'sets';
     ui.view = 'main';
     ui.lastWhere = '';
     ui.dirty = false;
@@ -216,10 +221,10 @@ export async function openManager(tab) {
     <button type="button" class="kls-tab" data-tab="sets" role="tab">เซท</button>
     <button type="button" class="kls-tab" data-tab="chat" role="tab">แชทนี้</button>
     <button type="button" class="kls-tab" data-tab="bot" role="tab">บอทนี้</button>
-    <button type="button" class="kls-tab" data-tab="time" role="tab">ตามเวลา</button>
+    <button type="button" class="kls-tab" data-tab="rule" role="tab">กฎการเปลี่ยน</button>
   </div>
   <div class="kls-now"></div>
-  <small class="kls-hint">ลำดับความสำคัญ: แชทนี้ › บอทนี้ › ตามเวลา · ระดับไหนไม่มีเซทที่ใช้ได้ตอนนี้ จะส่งต่อให้ระดับถัดไป · สิ่งที่แก้จะมีผลเมื่อปิดหน้านี้ (กด ลองใช้ เพื่อดูเซทก่อน)</small>
+  <small class="kls-hint">ลำดับความสำคัญ: แชทนี้ › บอทนี้ › กฎสุ่ม · เซทที่ผูกกับแชท/บอทชนะกฎสุ่มเสมอ · สิ่งที่แก้จะมีผลเมื่อปิดหน้านี้ (กด ลองใช้ เพื่อดูเซทก่อน)</small>
 </div>
 <div class="kls-body"></div>`;
     ui.root = root;
@@ -279,7 +284,8 @@ function render() {
     try {
         if (ui.view === 'bgpick') body.innerHTML = renderBgPicker();
         else if (ui.tab === 'sets') body.innerHTML = renderSets();
-        else body.innerHTML = renderPool(ui.tab);
+        else if (ui.tab === 'rule') body.innerHTML = renderRule();
+        else body.innerHTML = renderBound(ui.tab);
         if (ui.view === 'bgpick') loadBgGrid();
         if (scroller) scroller.scrollTop = keep;
     } catch (err) {
@@ -304,6 +310,15 @@ function setOptions(selected) {
     if (!sets.some(x => x.id === selected)) opts.push(`<option value="" selected>เลือกเซท</option>`);
     for (const x of sets) opts.push(`<option value="${esc(x.id)}" ${x.id === selected ? 'selected' : ''}>${esc(x.name)}</option>`);
     return opts.join('');
+}
+
+function tagSeg(tag) {
+    return `<div class="kls-seg" role="group" aria-label="ช่วงเวลาของเซท">${['', 'day', 'night'].map(t => `
+<button type="button" class="kls-segbtn ${tag === t ? 'on' : ''}" data-act="set-tag" data-tag="${t}" aria-pressed="${tag === t}"><i class="fa-solid ${TAG_ICON[t]}"></i><span>${TAG_LABEL[t]}</span></button>`).join('')}</div>`;
+}
+
+function tagBadge(tag) {
+    return tag ? `<span class="kls-tagbadge"><i class="fa-solid ${TAG_ICON[tag]}"></i>${TAG_LABEL[tag]}</span>` : '';
 }
 
 function bgLabel(set) {
@@ -339,11 +354,14 @@ function renderSets() {
     </button>
     <div class="kls-card-main">
       <input type="text" class="text_pole kls-name" data-field="name" value="${esc(set.name)}" placeholder="ชื่อเซท">
+      ${set.tag || set.noRandom ? `<div class="kls-badges">${tagBadge(set.tag)}${set.noRandom ? '<span class="kls-tagbadge kls-tag-off">ไม่สุ่ม</span>' : ''}</div>` : ''}
       <small class="kls-muted">${active ? '<i class="fa-solid fa-circle-check"></i> ใช้อยู่ · ' : ''}${usage.length ? `ใช้ใน: ${esc(usage.join(' · '))}` : 'ยังไม่ได้ใช้ในกติกาไหน'}</small>
     </div>
   </div>
   <div class="kls-row"><span>ธีม</span><select data-field="theme">${themeOptions(set.theme)}</select></div>
   <div class="kls-row"><span>BG</span><button type="button" class="kls-linkbtn" data-act="bg-pick">${esc(bgLabel(set))}</button></div>
+  <div class="kls-stack"><span>ใช้ช่วงไหน</span>${tagSeg(set.tag)}</div>
+  <label class="checkbox_label"><input type="checkbox" data-setflag="noRandom" ${set.noRandom ? 'checked' : ''}><span>ไม่เอาเซทนี้เข้ากฎสุ่ม</span></label>
   <div class="kls-row"><span>การวางภาพ</span><select data-field="fitting">${Object.entries(FIT_LABEL).map(([k, v]) => `<option value="${k}" ${k === set.fitting ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
   <details class="kls-details" ${set.bgCustom ? 'open' : ''}>
     <summary>ใช้ลิงก์รูปเอง</summary>
@@ -412,18 +430,46 @@ function drawBgGrid(data) {
     grid.innerHTML = none + (items || `<div class="kls-empty">ไม่พบ BG ที่ตรงกับคำค้น</div>`);
 }
 
-// ---------------------------------------------------------------- pool tabs
+// ---------------------------------------------------------------- แชทนี้ / บอทนี้ (เซทที่ผูก)
 function scopeLine(level) {
     const sc = scope();
-    if (level === 'chat') return sc.chatId ? `<b>แชท: ${esc(sc.chatId)}</b><small class="kls-muted">กติกานี้เก็บไว้ในไฟล์แชทนี้</small>` : '';
-    if (level === 'bot') {
-        const kind = sc.botKey.startsWith('group:') ? 'กลุ่ม' : 'บอท';
-        return sc.botKey ? `<b>${kind}: ${esc(sc.botName)}</b><small class="kls-muted">ใช้กับทุกแชทของ${kind}นี้ ที่ไม่ได้กำหนดระดับแชทไว้</small>` : '';
-    }
-    return '<b>ทุกแชท</b><small class="kls-muted">ใช้เมื่อแชทและบอทไม่ได้กำหนดไว้ หรือเซทที่กำหนดไม่อยู่ในช่วงเวลา</small>';
+    if (level === 'chat') return `<b>แชท: ${esc(sc.chatId)}</b><small class="kls-muted">เก็บไว้ในไฟล์แชทนี้ · ชนะเซทของบอทและกฎสุ่มเสมอ</small>`;
+    const kind = sc.botKey.startsWith('group:') ? 'กลุ่ม' : 'บอท';
+    return `<b>${kind}: ${esc(sc.botName)}</b><small class="kls-muted">ใช้กับทุกแชทของ${kind}นี้ที่ไม่ได้ผูกเซทไว้ · ชนะกฎสุ่มเสมอ</small>`;
 }
 
-function renderPool(level) {
+function poolFoot(level, canClear) {
+    const st = stateOf(level);
+    const lastSet = st?.setId ? getSet(st.setId) : null;
+    return `
+<div class="kls-pool-foot">
+  <small class="kls-muted">${lastSet ? `สุ่มได้ล่าสุด: <b>${esc(lastSet.name)}</b> · ${esc(new Date(st.at).toLocaleString())}` : 'ยังไม่เคยสุ่มในระดับนี้'}</small>
+  <div class="kls-toolbar">
+    <button type="button" class="menu_button kls-btn" data-act="pool-reroll"><i class="fa-solid fa-shuffle"></i><span>สุ่มใหม่</span></button>
+    ${canClear ? '<button type="button" class="menu_button kls-btn kls-danger" data-act="pool-clear"><i class="fa-solid fa-eraser"></i><span>เลิกผูกทั้งหมด</span></button>' : ''}
+  </div>
+</div>`;
+}
+
+/** คำอธิบายว่าเซทที่ผูกไว้จะเปลี่ยนอย่างไร (และคำเตือน) */
+function boundNote(level, ids) {
+    if (!ids.length) return '';
+    const missing = boundMissing(level);
+    const tags = new Set(ids.map(tagOf));
+    if (missing) {
+        const only = missing === 'night' ? 'กลางวัน' : 'กลางคืน';
+        return `<div class="kls-note kls-warn-note"><i class="fa-solid fa-triangle-exclamation"></i><span>ผูกไว้แต่เซท${only} · ช่วง${PERIOD_LABEL[missing]}จะใช้เซท${only}ด้วย <b>ชนะกฎเวลาเสมอ</b> · ถ้าอยากให้สลับตามเวลา ให้ผูกเซท${PERIOD_LABEL[missing]}หรือเซท "ทั้งคู่" เพิ่ม</span></div>`;
+    }
+    if (tags.has('day') || tags.has('night')) {
+        if (!timeReady()) {
+            return `<div class="kls-note kls-warn-note"><i class="fa-solid fa-clock"></i><span>มีเซทกลางวัน/กลางคืน แต่ยังไม่ได้ตั้งเวลากลางวัน/กลางคืน · <b>กฎเวลาจะไม่ทำงาน</b> จะสุ่มจากทุกเซทที่ผูกไว้ · ตั้งได้ที่แท็บ <button type="button" class="kls-linkbtn" data-act="go-rule">กฎการเปลี่ยน</button></span></div>`;
+        }
+        return `<div class="kls-note"><i class="fa-solid fa-circle-half-stroke"></i><span>สลับตามกลางวัน/กลางคืน (${esc(dnRangeText())}) · ${esc(ruleFreqText())}</span></div>`;
+    }
+    return `<div class="kls-note"><i class="fa-solid fa-shuffle"></i><span>${ids.length > 1 ? `สุ่มจากเซทที่ผูกไว้ · ${esc(ruleFreqText())}` : 'ใช้เซทนี้ตลอด'}</span></div>`;
+}
+
+function renderBound(level) {
     const s = settings();
     const sc = scope();
     if (level === 'chat' && !sc.chatId) return `<div class="kls-empty">ยังไม่ได้เปิดแชท · เปิดแชทก่อน แล้วกลับมาที่แท็บนี้</div>`;
@@ -433,52 +479,100 @@ function renderPool(level) {
         return head + `<div class="kls-empty">ยังไม่มีเซท · ไปที่แท็บ <button type="button" class="kls-linkbtn" data-act="go-sets">เซท</button> เพื่อสร้างก่อน</div>`;
     }
     const pool = getPool(level);
-    if (!pool) {
-        return head + `<div class="kls-empty">ยังไม่ได้กำหนดเซทให้${LEVEL_LABEL[level]} · ระดับนี้จะส่งต่อให้ระดับถัดไป
-<div class="kls-toolbar"><button type="button" class="menu_button kls-btn" data-act="entry-add"><i class="fa-solid fa-plus"></i><span>เพิ่มเซท</span></button></div></div>`;
-    }
-    const isHour = pool.intervalMin % 60 === 0;
-    const intervalVal = isHour ? pool.intervalMin / 60 : pool.intervalMin;
+    const bound = new Set(pool?.entries.map(e => e.setId) || []);
+    const ids = s.sets.filter(x => bound.has(x.id)).map(x => x.id);
     const st = stateOf(level);
-    const lastSet = st?.setId ? getSet(st.setId) : null;
-    const multi = pool.entries.length > 1;
-
-    const entries = pool.entries.map((e, i) => {
-        const win = describeWindow(e, DAY_NAMES);
+    const items = s.sets.map(set => {
+        const on = bound.has(set.id);
         return `
-<div class="kls-entry ${lastSet && e.setId === lastSet.id ? 'is-active' : ''}" data-idx="${i}">
-  <div class="kls-row kls-entry-top">
-    <select data-entry="setId">${setOptions(e.setId)}</select>
-    <button type="button" class="kls-iconbtn" data-act="entry-del" title="ลบรายการนี้" aria-label="ลบรายการนี้"><i class="fa-solid fa-xmark"></i></button>
-  </div>
-  <div class="kls-row ${multi ? '' : 'kls-dim'}"><span>น้ำหนัก</span><input type="number" class="text_pole" data-entry="weight" min="0" step="1" value="${esc(e.weight)}"></div>
-  <div class="kls-row kls-time"><span>ช่วงเวลา</span><input type="time" class="text_pole" data-entry="from" value="${esc(e.from)}"><span class="kls-sep">–</span><input type="time" class="text_pole" data-entry="to" value="${esc(e.to)}"></div>
-  <div class="kls-days" role="group" aria-label="วัน">
-    ${DAY_NAMES.map((d, di) => `<button type="button" class="kls-day ${e.days.includes(di) ? 'on' : ''}" data-act="entry-day" data-day="${di}" aria-pressed="${e.days.includes(di)}">${d}</button>`).join('')}
-  </div>
-  <small class="kls-muted">${win ? `ใช้ได้: ${esc(win)}` : 'ใช้ได้ทุกเวลา'}</small>
-</div>`;
+<button type="button" class="kls-bind ${on ? 'on' : ''} ${st?.setId === set.id && on ? 'is-active' : ''}" data-act="bind-toggle" data-id="${esc(set.id)}" aria-pressed="${on}">
+  <span class="kls-bind-thumb" style='${thumbStyle(set)}'></span>
+  <span class="kls-bind-main"><span class="kls-bind-name">${esc(set.name)}</span>${tagBadge(set.tag)}</span>
+  <i class="fa-solid ${on ? 'fa-square-check' : 'fa-square'} kls-bind-check"></i>
+</button>`;
     }).join('');
-
+    const enabled = !pool || pool.enabled !== false;
     return head + `
-<label class="checkbox_label"><input type="checkbox" data-pool="enabled" ${pool.enabled ? 'checked' : ''}><span>ใช้กติกาของ${LEVEL_LABEL[level]}</span></label>
-<div class="kls-row"><span>เปลี่ยนเซท</span><select data-pool="mode">${Object.entries(MODE_LABEL).map(([k, v]) => `<option value="${k}" ${k === pool.mode ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
-<small class="kls-hint">${MODE_HINT[pool.mode]}</small>
-${pool.mode === 'interval' ? `<div class="kls-row"><span>ทุก</span><input type="number" class="text_pole" data-pool="intervalVal" min="1" step="1" value="${intervalVal}"><select data-pool="intervalUnit"><option value="60" ${isHour ? 'selected' : ''}>ชั่วโมง</option><option value="1" ${isHour ? '' : 'selected'}>นาที</option></select></div>` : ''}
-${pool.mode === 'daily' ? `<div class="kls-row"><span>เริ่มวันใหม่</span><select data-pool="dayStartHour">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${h === pool.dayStartHour ? 'selected' : ''}>${String(h).padStart(2, '0')}:00</option>`).join('')}</select></div>` : ''}
-${pool.mode !== 'time' ? `<label class="checkbox_label"><input type="checkbox" data-pool="noRepeat" ${pool.noRepeat ? 'checked' : ''}><span>ไม่ซ้ำเซทเดิมติดกัน</span></label>` : ''}
-<div class="kls-subhead">เซทที่ใช้ได้ <small class="kls-muted">${multi ? 'น้ำหนักมาก = ออกบ่อย · ช่วงเวลาและวันเว้นว่างได้' : 'เพิ่มได้หลายเซทเพื่อสุ่ม · ช่วงเวลาและวันเว้นว่างได้'}</small></div>
-<div class="kls-entries">${entries || '<div class="kls-empty">ยังไม่มีเซทในกติกานี้ · กด เพิ่มเซท</div>'}</div>
-<div class="kls-toolbar">
-  <button type="button" class="menu_button kls-btn" data-act="entry-add"><i class="fa-solid fa-plus"></i><span>เพิ่มเซท</span></button>
-</div>
-<div class="kls-pool-foot">
-  <small class="kls-muted">${lastSet ? `สุ่มได้ล่าสุด: <b>${esc(lastSet.name)}</b> · ${esc(new Date(st.at).toLocaleString())}` : 'ยังไม่เคยสุ่มในระดับนี้'}</small>
-  <div class="kls-toolbar">
-    <button type="button" class="menu_button kls-btn" data-act="pool-reroll"><i class="fa-solid fa-shuffle"></i><span>สุ่มใหม่</span></button>
-    <button type="button" class="menu_button kls-btn kls-danger" data-act="pool-clear"><i class="fa-solid fa-eraser"></i><span>ล้างกติกานี้</span></button>
-  </div>
+${pool ? `<label class="checkbox_label"><input type="checkbox" data-bound="enabled" ${enabled ? 'checked' : ''}><span>ใช้เซทที่ผูกกับ${LEVEL_LABEL[level]}</span></label>` : ''}
+<div class="kls-subhead">ผูกเซท <small class="kls-muted">${ids.length ? `ผูกไว้ ${ids.length} เซท` : `ยังไม่ได้ผูก · ${LEVEL_LABEL[level]}จะส่งต่อให้ระดับถัดไป`} · แตะเพื่อผูก/เลิกผูก</small></div>
+${enabled ? boundNote(level, ids) : '<div class="kls-note"><span>ปิดอยู่ · ส่งต่อให้ระดับถัดไป</span></div>'}
+<div class="kls-binds">${items}</div>
+${ids.length ? poolFoot(level, true) : ''}`;
+}
+
+// ---------------------------------------------------------------- กฎการเปลี่ยน
+function renderRule() {
+    const s = settings();
+    const r = s.rule;
+    const dn = s.dayNight;
+    const ready = timeReady();
+    const per = currentPeriod();
+    const pool = randomIds();
+    const count = (t) => s.sets.filter(x => !x.noRandom && x.tag === t).length;
+
+    const dnBox = `
+<div class="kls-section">
+  <div class="kls-subhead">กลางวัน / กลางคืน <small class="kls-muted">ตั้งครั้งเดียว ใช้กับทุกเซทที่ติดแท็ก ทั้งในกฎสุ่ม แชท และบอท</small></div>
+  <div class="kls-row kls-time"><span><i class="fa-solid fa-sun"></i> กลางวันเริ่ม</span><input type="time" class="text_pole" data-dn="day" value="${esc(dn.day)}"></div>
+  <div class="kls-row kls-time"><span><i class="fa-solid fa-moon"></i> กลางคืนเริ่ม</span><input type="time" class="text_pole" data-dn="night" value="${esc(dn.night)}"></div>
+  ${ready
+        ? `<div class="kls-note"><i class="fa-solid ${per.period === 'day' ? 'fa-sun' : 'fa-moon'}"></i><span>ตอนนี้เป็น<b>${PERIOD_LABEL[per.period]}</b> · ${esc(dnRangeText())}</span></div>`
+        : `<div class="kls-note kls-warn-note"><i class="fa-solid fa-clock"></i><span>${dn.day && dn.night ? 'เวลากลางวันกับกลางคืนต้องไม่ซ้ำกัน' : 'ยังไม่ได้ตั้งเวลา'} · <b>กฎเวลาจะไม่ทำงาน</b> แท็กกลางวัน/กลางคืนของเซทจะยังไม่มีผล</span></div>`}
+  <label class="checkbox_label ${ready ? '' : 'kls-dim'}"><input type="checkbox" data-rule="liveTime" ${s.liveTime ? 'checked' : ''} ${ready ? '' : 'disabled'}><span>เปลี่ยนทันทีเมื่อเข้ากลางวัน/กลางคืน</span></label>
+  <small class="kls-hint">ขณะแชทเปิดค้าง · ถ้าปิดไว้ หรือเป็นการข้ามรอบเวลาธรรมดา จะรอเปลี่ยนตอนเปิดแชทครั้งถัดไป</small>
+  ${dn.day || dn.night ? '<div class="kls-toolbar"><button type="button" class="menu_button kls-btn" data-act="dn-clear"><i class="fa-solid fa-eraser"></i><span>ล้างเวลา</span></button></div>' : ''}
 </div>`;
+
+    const dnSeg = `
+<div class="kls-seg" role="group" aria-label="สุ่มจาก">
+  <button type="button" class="kls-segbtn ${!r.byDayNight ? 'on' : ''}" data-act="rule-dn" data-val="0" aria-pressed="${!r.byDayNight}"><i class="fa-solid fa-layer-group"></i><span>ทุกเซท</span></button>
+  <button type="button" class="kls-segbtn ${r.byDayNight ? 'on' : ''}" data-act="rule-dn" data-val="1" aria-pressed="${r.byDayNight}" ${ready ? '' : 'disabled'}><i class="fa-solid fa-circle-half-stroke"></i><span>ตามกลางวัน/กลางคืน</span></button>
+</div>
+${ready ? '' : '<small class="kls-hint">ตั้งเวลากลางวัน/กลางคืนด้านบนก่อน ถึงจะเลือกตามกลางวัน/กลางคืนได้</small>'}`;
+
+    const card = (mode, icon, title, desc, body) => `
+<div class="kls-mode ${r.mode === mode ? 'on' : ''}">
+  <button type="button" class="kls-mode-head" data-act="rule-mode" data-mode="${mode}" aria-pressed="${r.mode === mode}">
+    <i class="fa-solid ${icon}"></i>
+    <span class="kls-mode-text"><b>${title}</b><small>${desc}</small></span>
+    <i class="fa-solid ${r.mode === mode ? 'fa-circle-dot' : 'fa-circle'} kls-mode-radio"></i>
+  </button>
+  ${r.mode === mode ? `<div class="kls-mode-body">${body}</div>` : ''}
+</div>`;
+
+    const hoursSeg = `
+<div class="kls-seg" role="group" aria-label="ทุกกี่ชั่วโมง">${HOURS.map(h => `
+  <button type="button" class="kls-segbtn ${r.hours === h ? 'on' : ''}" data-act="rule-hours" data-val="${h}" aria-pressed="${r.hours === h}"><span>${h} ชม.</span></button>`).join('')}
+</div>
+<small class="kls-hint">นับจาก 0:00 ตามนาฬิกาจริง${r.hours < 24 ? ` (${Array.from({ length: 24 / r.hours }, (_, i) => `${String(i * r.hours).padStart(2, '0')}:00`).slice(0, 6).join(', ')}${24 / r.hours > 6 ? ' …' : ''})` : ' · วันละครั้ง'} · ข้ามรอบแล้วจะเปลี่ยนตอนเปิดแชทครั้งถัดไป</small>`;
+
+    let poolWarn = '';
+    if (r.enabled && !pool.length) poolWarn = '<div class="kls-note kls-warn-note"><i class="fa-solid fa-triangle-exclamation"></i><span>ไม่มีเซทที่เข้ากฎสุ่ม · แชทที่ไม่ได้ผูกเซทจะใช้ธีมและ BG ปกติ</span></div>';
+    else if (r.enabled && r.byDayNight && ready) {
+        const day = pool.filter(id => tagOf(id) !== 'night').length;
+        const night = pool.filter(id => tagOf(id) !== 'day').length;
+        if (!day || !night) poolWarn = `<div class="kls-note kls-warn-note"><i class="fa-solid fa-triangle-exclamation"></i><span>ยังไม่มีเซท${!day ? 'กลางวัน' : 'กลางคืน'}ในกฎสุ่ม · ช่วงนั้นจะสุ่มจากทุกเซท</span></div>`;
+    }
+
+    return `
+<div class="kls-note kls-key-note"><i class="fa-solid fa-crown"></i><span>เซทที่ผูกไว้<b>รายแชท</b>และ<b>รายบอท</b> จะเอาชนะกฎสุ่มเสมอ · กฎนี้สุ่มให้แชทที่ไม่ได้ผูกเซท และความถี่ในการเปลี่ยนด้านล่างใช้กับเซทที่ผูกไว้ด้วย</span></div>
+${dnBox}
+<div class="kls-section">
+  <div class="kls-subhead">โหมดการเปลี่ยนเซท</div>
+  <div class="kls-modes">
+    ${card('open', 'fa-door-open', 'สุ่มใหม่ทุกครั้งที่เปิดแชท', 'เข้าแชทเมื่อไรก็ได้เซทใหม่', dnSeg)}
+    ${card('interval', 'fa-clock-rotate-left', 'ตามรอบเวลา', 'ทุก 1 / 6 / 12 / 24 ชม. ตามนาฬิกา', hoursSeg + dnSeg)}
+  </div>
+  <label class="checkbox_label"><input type="checkbox" data-rule="noRepeat" ${r.noRepeat ? 'checked' : ''}><span>ไม่ซ้ำเซทเดิมติดกัน</span></label>
+</div>
+<div class="kls-section">
+  <label class="checkbox_label"><input type="checkbox" data-rule="enabled" ${r.enabled ? 'checked' : ''}><span>สุ่มเซทให้แชทที่ไม่ได้ผูกเซทไว้</span></label>
+  <small class="kls-hint">${r.enabled
+        ? `เซทที่เข้ากฎสุ่ม ${pool.length} เซท (กลางวัน ${count('day')} · กลางคืน ${count('night')} · ทั้งคู่ ${count('')}) · เอาเซทออกได้ที่แท็บ <button type="button" class="kls-linkbtn" data-act="go-sets">เซท</button>`
+        : 'ปิดอยู่ · แชทที่ไม่ได้ผูกเซทจะใช้ธีมและ BG ปกติ'}</small>
+  ${poolWarn}
+</div>
+${r.enabled && pool.length ? poolFoot('rule', false) : ''}`;
 }
 
 // ---------------------------------------------------------------- events
@@ -487,11 +581,6 @@ function cardSet(el) {
     return id ? getSet(id) : null;
 }
 
-function entryOf(el) {
-    const idx = Number(el.closest('[data-idx]')?.dataset.idx);
-    const pool = ensurePool(ui.tab);
-    return { pool, idx, entry: pool?.entries[idx] };
-}
 
 async function onClick(ev) {
     const tabBtn = ev.target.closest('.kls-tab');
@@ -564,34 +653,48 @@ async function onClick(ev) {
         }
         case 'back':
             ui.view = 'main'; render(); break;
-        case 'entry-add': {
+        case 'go-rule':
+            ui.tab = 'rule'; lsSet('kls_tab', 'rule'); render(); break;
+        case 'set-tag': {
+            const set = cardSet(btn);
+            if (!set) break;
+            set.tag = btn.dataset.tag || '';
+            save(); render(); refreshSoon();
+            break;
+        }
+        case 'bind-toggle': {
             const pool = ensurePool(ui.tab);
             if (!pool) break;
-            const used = new Set(pool.entries.map(e => e.setId));
-            const next = s.sets.find(x => !used.has(x.id)) || s.sets[0];
-            pool.entries.push(defaultEntry(next?.id || ''));
-            savePool(ui.tab); render(); refreshSoon();
+            const id = btn.dataset.id;
+            const i = pool.entries.findIndex(e => e.setId === id);
+            if (i >= 0) pool.entries.splice(i, 1);
+            else pool.entries.push({ setId: id });
+            if (!pool.entries.length) clearPool(ui.tab);
+            else savePool(ui.tab);
+            render(); refreshSoon();
             break;
         }
-        case 'entry-del': {
-            const { pool, idx } = entryOf(btn);
-            if (!pool) break;
-            pool.entries.splice(idx, 1);
-            savePool(ui.tab); render(); refreshSoon();
+        case 'rule-mode':
+            s.rule.mode = btn.dataset.mode === 'interval' ? 'interval' : 'open';
+            save(); render(); refreshSoon();
             break;
-        }
-        case 'entry-day': {
-            const { entry } = entryOf(btn);
-            if (!entry) break;
-            const d = Number(btn.dataset.day);
-            entry.days = entry.days.includes(d) ? entry.days.filter(x => x !== d) : [...entry.days, d].sort();
-            savePool(ui.tab); render(); refreshSoon();
+        case 'rule-hours':
+            s.rule.hours = HOURS.includes(Number(btn.dataset.val)) ? Number(btn.dataset.val) : 6;
+            save(); render(); refreshSoon();
             break;
-        }
+        case 'rule-dn':
+            s.rule.byDayNight = btn.dataset.val === '1' && timeReady();
+            save(); render(); refreshSoon();
+            break;
+        case 'dn-clear':
+            s.dayNight = { day: '', night: '' };
+            s.rule.byDayNight = false;
+            save(); render(); refreshSoon();
+            break;
         case 'pool-reroll':
             await rerollLevel(ui.tab); render(); break;
         case 'pool-clear': {
-            const ok = await c.Popup.show.confirm(`ล้างกติกาของ${LEVEL_LABEL[ui.tab]}?`, 'เซทยังอยู่ครบ เอาออกแค่กติกาของระดับนี้', { okButton: 'ล้าง', cancelButton: 'ยกเลิก' });
+            const ok = await c.Popup.show.confirm(`เลิกผูกเซททั้งหมดของ${LEVEL_LABEL[ui.tab]}?`, 'เซทยังอยู่ครบ เอาออกแค่การผูกของระดับนี้', { okButton: 'เลิกผูก', cancelButton: 'ยกเลิก' });
             if (ok !== c.POPUP_RESULT.AFFIRMATIVE) break;
             clearPool(ui.tab); render(); refreshSoon();
             break;
@@ -610,28 +713,34 @@ function onChange(ev) {
         if (el.dataset.field !== 'name') { render(); if (status.setId === set.id) refreshSoon(); }
         return;
     }
-    if (el.dataset.pool) {
+    if (el.dataset.setflag) {
+        const set = cardSet(el);
+        if (!set) return;
+        set[el.dataset.setflag] = el.checked;
+        save(); render(); refreshSoon();
+        return;
+    }
+    if (el.dataset.bound) {
         const pool = ensurePool(ui.tab);
         if (!pool) return;
-        const k = el.dataset.pool;
-        if (k === 'enabled' || k === 'noRepeat') pool[k] = el.checked;
-        else if (k === 'mode') pool.mode = el.value;
-        else if (k === 'dayStartHour') pool.dayStartHour = Number(el.value) || 0;
-        else if (k === 'intervalVal' || k === 'intervalUnit') {
-            const val = Math.max(1, Number(ui.root.querySelector('[data-pool="intervalVal"]')?.value) || 1);
-            const unit = Number(ui.root.querySelector('[data-pool="intervalUnit"]')?.value) || 60;
-            pool.intervalMin = Math.round(val * unit);
-        }
+        pool.enabled = el.checked;
         savePool(ui.tab); render(); refreshSoon();
         return;
     }
-    if (el.dataset.entry) {
-        const { entry } = entryOf(el);
-        if (!entry) return;
-        const k = el.dataset.entry;
-        if (k === 'weight') entry.weight = Math.max(0, Number(el.value) || 0);
-        else entry[k] = el.value;
-        savePool(ui.tab); render(); refreshSoon();
+    if (el.dataset.rule) {
+        const s = settings();
+        const k = el.dataset.rule;
+        if (k === 'liveTime') s.liveTime = el.checked;
+        else s.rule[k] = el.checked;
+        save(); render();
+        if (k !== 'liveTime') refreshSoon();
+        return;
+    }
+    if (el.dataset.dn) {
+        const s = settings();
+        s.dayNight[el.dataset.dn] = el.value || '';
+        if (!timeReady()) s.rule.byDayNight = false;
+        save(); render(); refreshSoon();
         return;
     }
     if (el.dataset.bg === 'folder') {
@@ -667,12 +776,14 @@ export async function diagnose() {
     lines.push(`UA: ${navigator.userAgent}`);
     lines.push(`viewport: ${innerWidth}x${innerHeight}`);
     lines.push(`enabled=${s.enabled} lock=${s.respectChatBgLock} live=${s.liveTime} notify=${s.notify}`);
-    lines.push(`sets=${s.sets.length} bots=${Object.keys(s.characters).length} global=${s.global ? s.global.mode + '/' + s.global.entries.length : 'none'}`);
+    lines.push(`sets=${s.sets.length} (day ${s.sets.filter(x => x.tag === 'day').length} night ${s.sets.filter(x => x.tag === 'night').length} noRandom ${s.sets.filter(x => x.noRandom).length}) bots=${Object.keys(s.characters).length}`);
+    lines.push(`rule: ${JSON.stringify(s.rule)} · dayNight=${s.dayNight.day || '-'}/${s.dayNight.night || '-'} ready=${timeReady()} now=${currentPeriod()?.period || '-'}`);
     lines.push(`chat=${sc.chatId || '-'} bot=${sc.botKey || '-'}`);
-    for (const lv of ['chat', 'bot', 'time']) {
+    for (const lv of ['chat', 'bot', 'rule']) {
         const p = getPool(lv);
         const st = stateOf(lv);
-        lines.push(`  ${lv}: ${p ? `${p.enabled ? 'on' : 'off'} ${p.mode} entries=${p.entries.length}` : '-'} state=${st ? `${getSet(st.setId)?.name || st.setId}@${st.bucket}` : '-'}`);
+        const what = lv === 'rule' ? `random=${randomIds().length}` : p ? `${p.enabled ? 'on' : 'off'} bound=${p.entries.length} missing=${boundMissing(lv) || '-'}` : '-';
+        lines.push(`  ${lv}: ${what} state=${st ? `${getSet(st.setId)?.name || st.setId}@${st.bucket}` : '-'}`);
     }
     lines.push(`status: level=${status.level || '-'} set=${status.setName || '-'} trigger=${status.trigger}`);
     lines.push(`theme: current=${c.powerUserSettings?.theme} base=${s.baseTheme} applied=${s.appliedTheme || '-'} themes=${listThemes().length}`);

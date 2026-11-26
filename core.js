@@ -1,6 +1,7 @@
 // core.js — การตั้งค่า, การตัดสินเซท และการใส่ธีม/BG ให้ SillyTavern
 import {
-    defaultPool, normalizePool, resolveLevels, newId, LEVELS,
+    normalizeBound, normalizeRule, normalizeDayNight, dayNightReady, periodAt, forPeriod,
+    resolveLevels, resolveIds, migrateGlobal, defaultRule, newId, TAGS,
 } from './engine.js';
 
 export const MODULE = 'kaleidoscope';
@@ -24,16 +25,17 @@ export function note(kind, msg) {
 
 // ---------------------------------------------------------------- settings
 const DEFAULTS = {
-    version: 1,
+    version: 2,
     enabled: true,
     respectChatBgLock: true,
-    liveTime: false,
+    liveTime: false,    // เปลี่ยนทันทีเมื่อข้ามกลางวัน/กลางคืน ขณะแชทเปิดค้าง
     notify: false,
     sets: [],
-    characters: {},     // 'char:<avatar>' | 'group:<id>' → pool
-    global: null,       // pool ระดับเวลา (ล่างสุด)
+    characters: {},     // 'char:<avatar>' | 'group:<id>' → bound { enabled, entries: [{ setId }] }
+    rule: null,         // กฎการเปลี่ยนเซท (ระดับล่างสุด + ความถี่ของทุกระดับ)
+    dayNight: { day: '', night: '' },
     botState: {},       // botKey → state
-    globalState: null,
+    globalState: null,  // state ของกฎสุ่ม
     chatState: {},      // `${botKey}|${chatId}` → state
     baseTheme: '',      // ธีมปกติของผู้ใช้ (ใช้คืนเมื่อไม่มีเซทกำหนดธีม)
     appliedTheme: '',   // ธีมที่เราใส่ไว้ล่าสุด ('' = ไม่ได้ใส่)
@@ -57,6 +59,18 @@ export const save = () => ctx().saveSettingsDebounced();
 
 export function normalizeAll() {
     const s = settings();
+    // v1 → v2: กติกา "ตามเวลา" กลายเป็นกฎการเปลี่ยนเซท · เซทที่ไม่ได้อยู่ในกติกาเดิมจะไม่ถูกสุ่ม
+    let inRandom = null;
+    if (!s.rule || (Number(s.version) || 1) < 2) {
+        const m = migrateGlobal(s.global);
+        // ติดตั้งใหม่ (ยังไม่มีเซท) → เปิดกฎสุ่มไว้ · ผู้ใช้เดิมที่ไม่เคยตั้งกติกาตามเวลา → ปิดไว้เหมือนเดิม
+        if (!s.rule) s.rule = !s.global && !s.sets.length ? defaultRule() : m.rule;
+        inRandom = m.inRandom;
+        if (s.global) note('ok', `ย้ายกติกาตามเวลาเดิมเป็นกฎ: ${s.rule.mode}/${s.rule.hours} enabled=${s.rule.enabled}`);
+        delete s.global;
+        s.globalState = null;
+        s.version = 2;
+    }
     s.sets = s.sets.filter(x => x && typeof x === 'object').map(x => ({
         id: x.id || newId(),
         name: String(x.name ?? 'เซท'),
@@ -64,9 +78,34 @@ export function normalizeAll() {
         bg: String(x.bg ?? ''),
         bgCustom: String(x.bgCustom ?? ''),
         fitting: FITTINGS.includes(x.fitting) ? x.fitting : '',
+        tag: TAGS.includes(x.tag) ? x.tag : '',
+        noRandom: inRandom ? !inRandom.has(x.id) : x.noRandom === true,
     }));
-    for (const k of Object.keys(s.characters)) s.characters[k] = normalizePool(s.characters[k], 'daily');
-    if (s.global) s.global = normalizePool(s.global, 'time');
+    for (const k of Object.keys(s.characters)) s.characters[k] = normalizeBound(s.characters[k]);
+    s.rule = normalizeRule(s.rule);
+    s.dayNight = normalizeDayNight(s.dayNight);
+}
+
+export const tagOf = (id) => getSet(id)?.tag || '';
+export const timeReady = () => dayNightReady(settings().dayNight);
+export const currentPeriod = (now = new Date()) => periodAt(settings().dayNight, now);
+
+/** เซทที่ผูกไว้ขาดช่วงไหน ('' = ครบ/ไม่ได้แยก) — ใช้เตือนว่าจะชนะกฎเวลาเสมอ */
+export function boundMissing(level) {
+    const pool = getPool(level);
+    if (!pool) return '';
+    return forPeriod(boundIds(pool), tagOf, null).missing;
+}
+
+function boundIds(pool) {
+    const valid = new Set(settings().sets.map(x => x.id));
+    return pool && pool.enabled !== false ? pool.entries.map(e => e.setId).filter(id => valid.has(id)) : [];
+}
+
+/** เซทที่เข้ากฎสุ่ม */
+export function randomIds() {
+    const s = settings();
+    return s.rule?.enabled ? s.sets.filter(x => !x.noRandom).map(x => x.id) : [];
 }
 
 export function getSet(id) {
@@ -97,10 +136,10 @@ export function getPool(level) {
     if (level === 'chat') {
         if (!sc.chatId) return null;
         const meta = ctx().chatMetadata?.[META_KEY];
-        return meta?.pool ? normalizePool(meta.pool, 'open') : null;
+        return meta?.pool ? normalizeBound(meta.pool) : null;
     }
     if (level === 'bot') return sc.botKey && s.characters[sc.botKey] ? s.characters[sc.botKey] : null;
-    return s.global;
+    return null;
 }
 
 /** สร้าง pool ใหม่ถ้ายังไม่มี แล้วคืนตัวที่แก้ได้ */
@@ -111,16 +150,15 @@ export function ensurePool(level) {
         if (!sc.chatId) return null;
         const md = ctx().chatMetadata;
         if (!md[META_KEY] || typeof md[META_KEY] !== 'object') md[META_KEY] = {};
-        md[META_KEY].pool = normalizePool(md[META_KEY].pool, 'open');
+        md[META_KEY].pool = normalizeBound(md[META_KEY].pool);
         return md[META_KEY].pool;
     }
     if (level === 'bot') {
         if (!sc.botKey) return null;
-        s.characters[sc.botKey] = normalizePool(s.characters[sc.botKey], 'daily');
+        s.characters[sc.botKey] = normalizeBound(s.characters[sc.botKey]);
         return s.characters[sc.botKey];
     }
-    s.global = normalizePool(s.global, 'time');
-    return s.global;
+    return null;
 }
 
 export function savePool(level) {
@@ -141,9 +179,6 @@ export function clearPool(level) {
     } else if (level === 'bot') {
         delete s.characters[sc.botKey];
         delete s.botState[sc.botKey];
-    } else {
-        s.global = null;
-        s.globalState = null;
     }
     save();
 }
@@ -179,7 +214,7 @@ export function usageOf(setId) {
     if (chatPool?.entries.some(e => e.setId === setId)) out.push('แชทนี้');
     const bots = Object.values(s.characters).filter(p => p?.entries?.some(e => e.setId === setId)).length;
     if (bots) out.push(`บอท ${bots} ตัว`);
-    if (s.global?.entries?.some(e => e.setId === setId)) out.push('ตามเวลา');
+    if (s.rule?.enabled && !getSet(setId)?.noRandom) out.push('กฎสุ่ม');
     return out;
 }
 
@@ -188,7 +223,6 @@ export function removeSetEverywhere(setId) {
     s.sets = s.sets.filter(x => x.id !== setId);
     const strip = (p) => { if (p?.entries) p.entries = p.entries.filter(e => e.setId !== setId); };
     Object.values(s.characters).forEach(strip);
-    strip(s.global);
     const md = ctx().chatMetadata;
     if (md?.[META_KEY]?.pool) {
         strip(md[META_KEY].pool);
@@ -346,17 +380,18 @@ async function applyBg(set, level) {
 /** ผลการใส่ BG ล่าสุด (ใช้แสดงสถานะ/ตรวจสอบ) */
 export const bgInfo = { blockedByLock: false };
 
-export const status = { level: '', setId: '', setName: '', mode: '', at: 0, trigger: '', note: '' };
+export const status = { level: '', setId: '', setName: '', mode: '', period: '', at: 0, trigger: '', note: '' };
 
-function modeOf(level) {
-    return getPool(level)?.mode || '';
+function modeOf() {
+    const r = settings().rule;
+    return r ? (r.mode === 'interval' ? `interval:${r.hours}` : 'open') : '';
 }
 
 async function apply(set, level, why = {}) {
     applyTheme(set);
     await applyBg(set, level);
     Object.assign(status, {
-        level, setId: set?.id || '', setName: set?.name || '', mode: why.mode || '',
+        level, setId: set?.id || '', setName: set?.name || '', mode: why.mode || '', period: why.period || '',
         at: Date.now(), trigger: why.trigger || '', note: why.note || '',
     });
     save();
@@ -383,15 +418,10 @@ export async function evaluate(trigger = 'refresh') {
             if (lastOpen.key === key && Date.now() - lastOpen.at < 2000) trigger = 'refresh';
             lastOpen = { key, at: Date.now() };
         }
-        const validIds = new Set(s.sets.map(x => x.id));
-        const levels = LEVELS
-            .map(level => ({ level, pool: getPool(level), state: getState(level, sc) }))
-            .filter(x => x.pool);
+        // tick: เปลี่ยนได้เฉพาะตอนข้ามกลางวัน/กลางคืน → ไม่ได้ตั้งเวลาไว้ก็ไม่มีอะไรต้องตรวจ
+        if (trigger === 'tick' && !timeReady()) return null;
 
-        // tick: ถ้าไม่มีระดับไหนเป็นโหมด time ก็ไม่มีอะไรต้องตรวจ
-        if (trigger === 'tick' && !levels.some(x => x.pool.mode === 'time' && x.pool.enabled)) return null;
-
-        const res = resolveLevels(levels, { trigger, validIds });
+        const res = resolveLevels(levelList(sc), resolveOpts(trigger));
         if (res?.rolled) setState(res.level, sc, res.state);
 
         const set = res ? getSet(res.setId) : null;
@@ -399,7 +429,7 @@ export async function evaluate(trigger = 'refresh') {
         const nextKey = `${res?.level || ''}|${set?.id || ''}`;
         if (trigger === 'tick' && prevKey === nextKey) return res;
 
-        await apply(set, res?.level || '', { trigger, mode: res ? modeOf(res.level) : '' });
+        await apply(set, res?.level || '', { trigger, mode: res ? modeOf() : '', period: res?.aware ? currentPeriod()?.period || '' : '' });
         if (set && s.notify && prevKey !== nextKey && trigger !== 'refresh') {
             toastr.info(set.name, 'Kaleidoscope', { timeOut: 2500 });
         }
@@ -414,12 +444,26 @@ export async function evaluate(trigger = 'refresh') {
 /** สุ่มใหม่เฉพาะระดับที่เลือก แล้วตัดสินทั้งหมดอีกรอบ */
 export async function rerollLevel(level) {
     const sc = scope();
-    const pool = getPool(level);
-    if (!pool) return null;
-    const validIds = new Set(settings().sets.map(x => x.id));
-    const res = resolveLevels([{ level, pool, state: getState(level, sc) }], { trigger: 'force', validIds });
+    const lv = levelList(sc).find(x => x.level === level);
+    if (!lv) return null;
+    const res = resolveIds(lv.ids, lv.state, { ...resolveOpts('force'), useTags: lv.useTags });
     if (res) setState(level, sc, res.state);
     return evaluate('refresh');
+}
+
+/** ระดับทั้งหมดตามลำดับความสำคัญ: แชท › บอท › กฎสุ่ม */
+function levelList(sc) {
+    const s = settings();
+    return [
+        { level: 'chat', ids: boundIds(getPool('chat')), state: getState('chat', sc), useTags: true },
+        { level: 'bot', ids: boundIds(getPool('bot')), state: getState('bot', sc), useTags: true },
+        { level: 'rule', ids: randomIds(), state: getState('rule', sc), useTags: !!s.rule?.byDayNight },
+    ];
+}
+
+function resolveOpts(trigger) {
+    const now = new Date();
+    return { rule: settings().rule, period: currentPeriod(now), tagOf, now, trigger };
 }
 
 /** state ล่าสุดของระดับนั้น (ใช้แสดงในหน้าจัดการ) */
@@ -459,12 +503,12 @@ export function setFromCurrent() {
         id: newId(),
         name: power?.theme || 'เซทใหม่',
         theme: power?.theme || '',
-        bg, bgCustom, fitting,
+        bg, bgCustom, fitting, tag: '', noRandom: false,
     };
 }
 
 export function newSet() {
-    return { id: newId(), name: `เซท ${settings().sets.length + 1}`, theme: '', bg: '', bgCustom: '', fitting: '' };
+    return { id: newId(), name: `เซท ${settings().sets.length + 1}`, theme: '', bg: '', bgCustom: '', fitting: '', tag: '', noRandom: false };
 }
 
 export function onCharacterRenamed(oldAvatar, newAvatar) {
@@ -479,4 +523,3 @@ export function onCharacterRenamed(oldAvatar, newAvatar) {
     save();
 }
 
-export { defaultPool };

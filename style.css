@@ -76,7 +76,7 @@ html.kls-pal :where(#kls_settings, .kls-popup) :is(.text_pole, textarea, input):
     padding: 4px 12px;
     white-space: nowrap;
 }
-.kls-btn:active { transform: scale(0.97); }
+:is(.kls-btn, .kls-bind, .kls-segbtn):active { transform: scale(0.97); }
 .kls-hint {
     display: block;
     opacity: 0.8;
@@ -115,9 +115,9 @@ html.kls-pal :where(#kls_settings, .kls-popup) :is(.text_pole, textarea, input):
     border-radius: var(--kls-r-pill);
 }
 .kls-tab {
-    flex: 1 1 0;
+    flex: 1 1 auto; /* ป้ายยาว (กฎการเปลี่ยน) ได้ที่มากกว่า ไม่โดนตัด */
     min-width: 0;
-    padding: 6px 4px;
+    padding: 6px 6px;
     border: 0;
     border-radius: var(--kls-r-pill);
     background: transparent;
@@ -210,14 +210,12 @@ html.kls-pal :where(#kls_settings, .kls-popup) :is(.text_pole, textarea, input):
 }
 .kls-iconbtn:active { transform: scale(0.97); }
 
-.kls-cards,
-.kls-entries {
+.kls-cards {
     display: flex;
     flex-direction: column;
     gap: 10px;
 }
-.kls-card,
-.kls-entry {
+.kls-card {
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -227,8 +225,7 @@ html.kls-pal :where(#kls_settings, .kls-popup) :is(.text_pole, textarea, input):
     background: var(--kls-p-surface2, transparent);
     min-width: 0;
 }
-.kls-card.is-active,
-.kls-entry.is-active {
+.kls-card.is-active {
     border-color: var(--kls-p-accent, var(--SmartThemeQuoteColor));
     box-shadow: inset 3px 0 0 var(--kls-p-accent, var(--SmartThemeQuoteColor));
 }
@@ -266,27 +263,137 @@ html.kls-pal :where(#kls_settings, .kls-popup) :is(.text_pole, textarea, input):
 .kls-details .text_pole { margin: 4px 0 0; }
 .kls-danger { color: var(--kls-p-danger, inherit); }
 
-.kls-days {
+/* ---------------------------------------------------------------- แท็กกลางวัน/กลางคืน และปุ่มแบ่งช่อง */
+.kls-seg {
     display: flex;
     gap: 4px;
+    padding: 3px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: var(--kls-r-pill);
+    min-width: 0;
 }
-.kls-day {
+.kls-stack { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.kls-segbtn {
     flex: 1 1 0;
     min-width: 0;
-    padding: 4px 0;
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: var(--kls-r-tag);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 5px 4px;
+    border: 0;
+    border-radius: var(--kls-r-pill);
     background: transparent;
     color: inherit;
     font: inherit;
     font-size: 0.9em;
     cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
-.kls-day.on {
+.kls-segbtn > span { overflow: hidden; text-overflow: ellipsis; }
+.kls-segbtn.on {
     background: var(--kls-p-accent, var(--SmartThemeQuoteColor));
-    border-color: var(--kls-p-accent, var(--SmartThemeQuoteColor));
     color: var(--kls-p-on-accent, var(--SmartThemeBodyColor));
 }
+.kls-segbtn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.kls-badges { display: flex; flex-wrap: wrap; gap: 4px; }
+.kls-tagbadge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 6px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: var(--kls-r-tag);
+    font-size: 0.8em;
+    white-space: nowrap;
+}
+.kls-tag-off { opacity: 0.75; }
+
+/* ---------------------------------------------------------------- กล่องข้อความอธิบาย/เตือน */
+.kls-note {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    padding: 8px 10px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: var(--kls-r-ctl);
+    line-height: 1.5;
+    min-width: 0;
+}
+.kls-note > i { flex: 0 0 auto; }
+.kls-note > span { flex: 1 1 0; min-width: 0; }
+.kls-warn-note { border-color: var(--kls-p-warn, currentColor); }
+.kls-warn-note > i { color: var(--kls-p-warn, inherit); }
+.kls-key-note { background: var(--kls-p-accent-soft, transparent); border-color: transparent; }
+.kls-section { display: flex; flex-direction: column; gap: 6px; }
+.kls-section + .kls-section { padding-top: 8px; border-top: 1px solid var(--SmartThemeBorderColor); }
+
+/* ---------------------------------------------------------------- การ์ดโหมด */
+.kls-modes { display: flex; flex-direction: column; gap: 8px; }
+.kls-mode {
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: var(--kls-r-card);
+    background: var(--kls-p-surface2, transparent);
+    min-width: 0;
+    overflow: hidden;
+}
+.kls-mode.on {
+    border-color: var(--kls-p-accent, var(--SmartThemeQuoteColor));
+    box-shadow: inset 3px 0 0 var(--kls-p-accent, var(--SmartThemeQuoteColor));
+}
+.kls-mode-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.kls-mode-text { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.kls-mode-text small { opacity: 0.8; }
+.kls-mode.on .kls-mode-radio { color: var(--kls-p-accent-text, var(--SmartThemeQuoteColor)); }
+.kls-mode-body { display: flex; flex-direction: column; gap: 6px; padding: 0 10px 10px; }
+
+/* ---------------------------------------------------------------- ผูกเซทกับแชท/บอท */
+.kls-binds { display: flex; flex-direction: column; gap: 6px; }
+.kls-bind {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: var(--kls-r-card);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    min-width: 0;
+}
+.kls-bind.on { border-color: var(--kls-p-accent, var(--SmartThemeQuoteColor)); background: var(--kls-p-accent-soft, transparent); }
+.kls-bind.is-active { box-shadow: inset 3px 0 0 var(--kls-p-accent, var(--SmartThemeQuoteColor)); }
+.kls-bind-thumb {
+    flex: 0 0 auto;
+    width: 56px;
+    height: 38px;
+    border-radius: var(--kls-r-ctl);
+    border: 1px solid var(--SmartThemeBorderColor);
+    background-color: var(--kls-p-surface, transparent);
+    background-size: cover;
+    background-position: center;
+}
+.kls-bind-main { flex: 1 1 0; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.kls-bind-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.kls-bind-check { flex: 0 0 auto; font-size: 1.15em; }
+.kls-bind.on .kls-bind-check { color: var(--kls-p-accent-text, var(--SmartThemeQuoteColor)); }
 
 .kls-pool-foot {
     display: flex;
@@ -354,7 +461,7 @@ html.kls-pal :where(#kls_settings, .kls-popup) :is(.text_pole, textarea, input):
 }
 
 /* ---------------------------------------------------------------- motion */
-:is(.kls-btn, .kls-iconbtn, .kls-bgitem) {
+:is(.kls-btn, .kls-iconbtn, .kls-bgitem, .kls-bind, .kls-segbtn) {
     transition: transform var(--animation-duration, 125ms) cubic-bezier(0.23, 1, 0.32, 1);
 }
 body.reduced-motion :is(.kls-mgr, #kls_settings) *,
