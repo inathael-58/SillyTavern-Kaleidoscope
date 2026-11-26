@@ -133,3 +133,24 @@ test('tick never lets a random-mode level start deciding mid-chat', () => {
     const p = pool('interval', [{ setId: 'a', from: '20:00', to: '23:00' }]);
     assert.equal(resolvePool(p, null, { now: at(20, 1), trigger: 'tick' }), null);
 });
+
+// ---------------------------------------------------------------- release hygiene
+import fs from 'node:fs';
+import { compareVersions, FILES } from '../updater.js';
+
+test('compareVersions', () => {
+    assert.equal(compareVersions('1.2.10', '1.2.9'), 1);
+    assert.equal(compareVersions('1.1', '1.1.0'), 0);
+    assert.equal(compareVersions('0.9.9', '1.0.0'), -1);
+});
+
+test('manifest version matches the running VERSION', () => {
+    const manifest = JSON.parse(fs.readFileSync(new URL('../manifest.json', import.meta.url), 'utf8'));
+    const ui = fs.readFileSync(new URL('../ui.js', import.meta.url), 'utf8');
+    assert.equal(/export const VERSION = '([^']+)'/.exec(ui)[1], manifest.version);
+});
+
+test('updater cache list covers every shipped file', () => {
+    const shipped = fs.readdirSync(new URL('..', import.meta.url)).filter(f => /\.(js|css)$/.test(f) || f === 'manifest.json');
+    assert.deepEqual([...shipped].sort(), [...FILES].sort());
+});

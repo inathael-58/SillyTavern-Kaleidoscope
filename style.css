@@ -56,7 +56,7 @@ html.kls-pal :where(#kls_settings, .kls-popup) :is(.text_pole, textarea, input):
     align-items: center;
     gap: 6px;
 }
-.kls-foot { justify-content: space-between; }
+
 .kls-btn {
     display: inline-flex;
     align-items: center;
@@ -75,7 +75,9 @@ html.kls-pal :where(#kls_settings, .kls-popup) :is(.text_pole, textarea, input):
     margin-top: -2px;
 }
 .kls-muted { color: var(--kls-p-muted, inherit); opacity: 0.9; }
-.kls-ver { opacity: 0.7; }
+.kls-ver { opacity: 0.8; line-height: 1.4; }
+.kls-ver.kls-warn { color: var(--kls-p-warn, inherit); opacity: 1; }
+.kls-ver.kls-bad { color: var(--kls-p-danger, inherit); opacity: 1; }
 .kls-diag { display: flex; flex-direction: column; gap: 6px; }
 .kls-diag textarea { font-family: monospace; font-size: 0.85em; width: 100%; }
 .kls-diag .kls-btn { align-self: flex-start; }

@@ -6,8 +6,9 @@ import {
     log, note, EXT_URL, bgModuleLoaded,
 } from './core.js';
 import { defaultEntry, describeWindow, newId } from './engine.js';
+import { pullLatest, serverVersion, compareVersions } from './updater.js';
 
-export const VERSION = '1.0.0';
+export const VERSION = '1.1.0';
 
 const DAY_NAMES = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 const LEVEL_LABEL = { chat: 'แชทนี้', bot: 'บอทนี้', time: 'ตามเวลา', preview: 'ลองใช้' };
@@ -62,9 +63,10 @@ export function renderDrawer() {
       <small class="kls-hint">เฉพาะโหมด "ตามช่วงเวลา" · ถ้าปิดไว้ จะเปลี่ยนตอนเข้าแชทครั้งถัดไป</small>
       <label class="checkbox_label"><input type="checkbox" id="kls_notify"><span>แจ้งเตือนเมื่อเปลี่ยนเซท</span></label>
       <div class="kls-foot">
+        <div class="menu_button kls-btn" id="kls_update"><i class="fa-solid fa-cloud-arrow-down"></i><span>ดึงเวอร์ชันล่าสุด</span></div>
         <div class="menu_button kls-btn" id="kls_diag"><i class="fa-solid fa-stethoscope"></i><span>ตรวจสอบ</span></div>
-        <small class="kls-ver">v${VERSION}</small>
       </div>
+      <small class="kls-ver" id="kls_ver">v${VERSION}</small>
       <div class="kls-diag" id="kls_diag_box" hidden>
         <textarea class="text_pole" id="kls_diag_text" rows="8" readonly></textarea>
         <div class="menu_button kls-btn" id="kls_diag_copy"><i class="fa-solid fa-copy"></i><span>คัดลอก</span></div>
@@ -109,8 +111,51 @@ export function renderDrawer() {
             document.execCommand?.('copy');
         }
     });
+    $root.find('#kls_update').on('click', onUpdateClick);
     onStatus(updateDrawer);
     updateDrawer();
+    checkVersion();
+}
+
+// ---------------------------------------------------------------- ดึงเวอร์ชัน
+async function checkVersion() {
+    try {
+        const server = await serverVersion();
+        const stale = compareVersions(server, VERSION) !== 0;
+        $('#kls_ver')
+            .toggleClass('kls-warn', stale)
+            .text(stale
+                ? `v${VERSION} · บนเซิร์ฟเวอร์ v${server} · กด ดึงเวอร์ชันล่าสุด เพื่อโหลดตัวใหม่`
+                : `v${VERSION}`);
+    } catch { /* ออฟไลน์ ก็แสดงแค่เวอร์ชันที่รันอยู่ */ }
+}
+
+let updating = false;
+async function onUpdateClick() {
+    if (updating) return;
+    updating = true;
+    const $btn = $('#kls_update');
+    $btn.addClass('disabled').find('span').text('กำลังดึง…');
+    $('#kls_ver').removeClass('kls-warn kls-bad').text(`v${VERSION} · กำลังตรวจหาเวอร์ชันใหม่…`);
+    try {
+        const res = await pullLatest(VERSION);
+        if (!res.needsReload) {
+            $('#kls_ver').text(`v${VERSION} · เป็นเวอร์ชันล่าสุดแล้ว`);
+            toastr.success(`เป็นเวอร์ชันล่าสุดแล้ว (v${VERSION})`, 'Kaleidoscope');
+            return;
+        }
+        const what = `v${res.to}${res.commit ? ` (${res.commit})` : ''}`;
+        $('#kls_ver').text(`ดึง ${what} แล้ว · โหลดหน้าใหม่เพื่อใช้งาน`);
+        const c = ctx();
+        const ok = await c.Popup.show.confirm('ดึงเวอร์ชันใหม่แล้ว', `Kaleidoscope ${what} · โหลดหน้าใหม่ตอนนี้เลยไหม`, { okButton: 'โหลดหน้าใหม่', cancelButton: 'ไว้ทีหลัง' });
+        if (ok === c.POPUP_RESULT.AFFIRMATIVE) location.reload();
+    } catch (err) {
+        $('#kls_ver').addClass('kls-bad').text(`v${VERSION} · ${err?.message || err}`);
+        toastr.error(String(err?.message || err), 'Kaleidoscope');
+    } finally {
+        updating = false;
+        $btn.removeClass('disabled').find('span').text('ดึงเวอร์ชันล่าสุด');
+    }
 }
 
 export function statusText() {
