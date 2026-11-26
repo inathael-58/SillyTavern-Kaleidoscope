@@ -29,6 +29,8 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<
 
 let refreshTimer = null;
 function refreshSoon() {
+    // ระหว่างเปิดหน้าจัดการ ห้ามเปลี่ยนธีม/BG ใต้มือผู้ใช้ — จดไว้ แล้วใส่ทีเดียวตอนปิดหน้า
+    if (ui.popup) { ui.dirty = true; return; }
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => evaluate('refresh'), 350);
 }
@@ -128,7 +130,9 @@ function updateDrawer() {
 }
 
 // ================================================================ manager popup
-const ui = { tab: 'sets', view: 'main', pickSetId: '', bgQuery: '', bgFolder: '', root: null, popup: null, lastWhere: '' };
+const ui = { tab: 'sets', view: 'main', pickSetId: '', bgQuery: '', bgFolder: '', root: null, popup: null, lastWhere: '', dirty: false };
+
+export const managerOpen = () => !!ui.popup;
 
 export async function openManager(tab) {
     const c = ctx();
@@ -137,6 +141,7 @@ export async function openManager(tab) {
     if (!['sets', 'chat', 'bot', 'time'].includes(ui.tab)) ui.tab = 'sets';
     ui.view = 'main';
     ui.lastWhere = '';
+    ui.dirty = false;
 
     const root = document.createElement('div');
     root.className = 'kls-mgr';
@@ -149,7 +154,7 @@ export async function openManager(tab) {
     <button type="button" class="kls-tab" data-tab="time" role="tab">ตามเวลา</button>
   </div>
   <div class="kls-now"></div>
-  <small class="kls-hint">ลำดับความสำคัญ: แชทนี้ › บอทนี้ › ตามเวลา · ระดับไหนไม่มีเซทที่ใช้ได้ตอนนี้ จะส่งต่อให้ระดับถัดไป</small>
+  <small class="kls-hint">ลำดับความสำคัญ: แชทนี้ › บอทนี้ › ตามเวลา · ระดับไหนไม่มีเซทที่ใช้ได้ตอนนี้ จะส่งต่อให้ระดับถัดไป · สิ่งที่แก้จะมีผลเมื่อปิดหน้านี้ (กด ลองใช้ เพื่อดูเซทก่อน)</small>
 </div>
 <div class="kls-body"></div>`;
     ui.root = root;
@@ -185,7 +190,9 @@ export async function openManager(tab) {
     } finally {
         ui.popup = null;
         ui.root = null;
-        evaluate('refresh');
+        // แก้กติกาแล้ว → ใส่ผลทีเดียวตอนปิด · ถ้ากำลังลองเซทอยู่ ให้ลองต่อจนกว่าจะเข้าแชทใหม่ตามที่บอกไว้
+        if (ui.dirty && status.level !== 'preview') evaluate('refresh');
+        ui.dirty = false;
     }
 }
 

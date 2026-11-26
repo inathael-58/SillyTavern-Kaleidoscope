@@ -2,7 +2,7 @@
 import {
     ctx, settings, normalizeAll, evaluate, preview, status, getSet, note, onCharacterRenamed,
 } from './core.js';
-import { renderDrawer, openManager, diagnose } from './ui.js';
+import { renderDrawer, openManager, diagnose, managerOpen } from './ui.js';
 import { installThemePalette } from './theme-palette.js';
 
 let tickTimer = null;
@@ -12,7 +12,7 @@ function startTick() {
     // ตรวจทุก 30 วินาที แต่ทำงานจริงเฉพาะเมื่อเปิด "เปลี่ยนตามช่วงเวลาทันที" และมีกติกาโหมด time
     tickTimer = setInterval(() => {
         const s = settings();
-        if (s.enabled && s.liveTime && document.visibilityState !== 'hidden') evaluate('tick');
+        if (s.enabled && s.liveTime && document.visibilityState !== 'hidden' && !managerOpen()) evaluate('tick');
     }, 30000);
 }
 
@@ -93,7 +93,7 @@ async function init() {
 
     // กลับมาที่แท็บหลังจากทิ้งไว้นาน → ถือเป็นการตรวจเวลาแบบ tick (ไม่สุ่มใหม่ถ้าแชทยังเปิดอยู่)
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible' && settings().liveTime) evaluate('tick');
+        if (document.visibilityState === 'visible' && settings().liveTime && !managerOpen()) evaluate('tick');
     });
     startTick();
 }
