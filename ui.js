@@ -9,7 +9,7 @@ import {
 import { newId, HOURS } from './engine.js';
 import { pullLatest, serverVersion, compareVersions } from './updater.js';
 
-export const VERSION = '1.3.0';
+export const VERSION = '1.3.1';
 
 const LEVEL_LABEL = { chat: 'แชทนี้', bot: 'บอทนี้', rule: 'กฎสุ่ม', preview: 'ลองใช้' };
 const TAG_LABEL = { '': 'ทั้งคู่', day: 'กลางวัน', night: 'กลางคืน' };
@@ -189,7 +189,30 @@ export function statusText() {
     if (!status.setId) return 'ไม่มีกติกาที่ตรงกับตอนนี้ · ใช้ธีมและ BG ปกติ';
     const mode = (status.mode ? ` · ${modeLabel(status.mode)}` : '') + (status.period ? ` · ${PERIOD_LABEL[status.period]}` : '');
     const lock = bgInfo.blockedByLock ? '<br><span class="kls-muted">BG ของแชทนี้ถูกล็อกไว้ด้วยปุ่มของ ST จึงใช้ BG ที่ล็อกแทน (ปิด “เคารพ BG ที่ล็อกกับแชท” ถ้าอยากให้เซทชนะ)</span>' : '';
-    return `ใช้อยู่: <b>${esc(status.setName)}</b><br><span class="kls-muted">จาก${LEVEL_LABEL[status.level] || status.level}${mode}</span>${lock}`;
+    const why = offPeriodReason();
+    return `ใช้อยู่: <b>${esc(status.setName)}</b><br><span class="kls-muted">จาก${LEVEL_LABEL[status.level] || status.level}${mode}</span>${lock}${why ? `<br><span class="kls-muted"><i class="fa-solid fa-circle-info"></i> ${why}</span>` : ''}`;
+}
+
+/** เซทที่ใช้อยู่ไม่ตรงกับกลางวัน/กลางคืนตอนนี้ → บอกเหตุผล ('' = ตรง หรือไม่ได้ตั้งเวลา) */
+function offPeriodReason() {
+    const per = currentPeriod();
+    const tag = tagOf(status.setId);
+    if (!per || !tag || tag === per.period) return '';
+    const now = PERIOD_LABEL[per.period];
+    const waiting = settings().liveTime
+        ? 'กำลังจะเปลี่ยนในไม่ช้า'
+        : 'จะเปลี่ยนตอนเปิดแชทครั้งถัดไป (หรือเปิด “เปลี่ยนทันทีเมื่อเข้ากลางวัน/กลางคืน” ในแท็บกฎการเปลี่ยน)';
+    if (status.level === 'chat' || status.level === 'bot') {
+        if (boundMissing(status.level)) return `ตอนนี้เป็น${now} แต่${LEVEL_LABEL[status.level]}ผูกไว้แต่เซท${TAG_LABEL[tag]} จึงชนะกฎเวลา`;
+        return `ตอนนี้เป็น${now}แล้ว · ${waiting}`;
+    }
+    if (status.level === 'rule') {
+        if (!settings().rule.byDayNight) return `ตอนนี้เป็น${now} แต่กฎสุ่มตั้งเป็นสุ่มจากทุกเซท`;
+        const list = randomIds().filter(id => tagOf(id) !== (per.period === 'day' ? 'night' : 'day'));
+        if (!list.length) return `ยังไม่มีเซท${now}ในกฎสุ่ม จึงสุ่มจากทุกเซท`;
+        return `ตอนนี้เป็น${now}แล้ว · ${waiting}`;
+    }
+    return '';
 }
 
 function updateDrawer() {
@@ -547,7 +570,9 @@ ${ready ? '' : '<small class="kls-hint">ตั้งเวลากลางว�
 <small class="kls-hint">นับจาก 0:00 ตามนาฬิกาจริง${r.hours < 24 ? ` (${Array.from({ length: 24 / r.hours }, (_, i) => `${String(i * r.hours).padStart(2, '0')}:00`).slice(0, 6).join(', ')}${24 / r.hours > 6 ? ' …' : ''})` : ' · วันละครั้ง'} · ข้ามรอบแล้วจะเปลี่ยนตอนเปิดแชทครั้งถัดไป</small>`;
 
     let poolWarn = '';
-    if (r.enabled && !pool.length) poolWarn = '<div class="kls-note kls-warn-note"><i class="fa-solid fa-triangle-exclamation"></i><span>ไม่มีเซทที่เข้ากฎสุ่ม · แชทที่ไม่ได้ผูกเซทจะใช้ธีมและ BG ปกติ</span></div>';
+    const tagged = pool.some(id => tagOf(id));
+    if (r.enabled && ready && !r.byDayNight && tagged) poolWarn = '<div class="kls-note kls-warn-note"><i class="fa-solid fa-triangle-exclamation"></i><span>กฎสุ่มตั้งเป็น <b>ทุกเซท</b> อยู่ · เซทกลางวันออกตอนกลางคืนได้ (และกลับกัน) · เลือก <b>ตามกลางวัน/กลางคืน</b> ในโหมดด้านบนถ้าอยากให้ตามเวลา</span></div>';
+    else if (r.enabled && !pool.length) poolWarn = '<div class="kls-note kls-warn-note"><i class="fa-solid fa-triangle-exclamation"></i><span>ไม่มีเซทที่เข้ากฎสุ่ม · แชทที่ไม่ได้ผูกเซทจะใช้ธีมและ BG ปกติ</span></div>';
     else if (r.enabled && r.byDayNight && ready) {
         const day = pool.filter(id => tagOf(id) !== 'night').length;
         const night = pool.filter(id => tagOf(id) !== 'day').length;
@@ -575,6 +600,21 @@ ${dnBox}
 ${r.enabled && pool.length ? poolFoot('rule', false) : ''}`;
 }
 
+/** เลื่อนไปที่การ์ดเซทที่เพิ่งสร้าง แล้วโฟกัสช่องชื่อ (มีเป็นสิบเซทแล้วไถหาไม่ไหว) */
+function revealSet(id) {
+    requestAnimationFrame(() => {
+        const card = ui.root?.querySelector(`.kls-card[data-set="${CSS.escape(id)}"]`);
+        if (!card) return;
+        const reduced = document.body.classList.contains('reduced-motion') || matchMedia('(prefers-reduced-motion: reduce)').matches;
+        card.scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' });
+        card.classList.add('is-new');
+        setTimeout(() => card.classList.remove('is-new'), 1600);
+        const name = card.querySelector('.kls-name');
+        name?.focus({ preventScroll: true });
+        name?.select?.();
+    });
+}
+
 // ---------------------------------------------------------------- events
 function cardSet(el) {
     const id = el.closest('[data-set]')?.dataset.set;
@@ -600,11 +640,14 @@ async function onClick(ev) {
     switch (act) {
         case 'go-sets':
             ui.tab = 'sets'; render(); break;
-        case 'set-add':
-            s.sets.push(newSet()); save(); render(); break;
+        case 'set-add': {
+            const set = newSet();
+            s.sets.push(set); save(); render(); revealSet(set.id);
+            break;
+        }
         case 'set-current': {
             const set = setFromCurrent();
-            s.sets.push(set); save(); render();
+            s.sets.push(set); save(); render(); revealSet(set.id);
             toastr.success(`เก็บ "${set.name}" เป็นเซทแล้ว`, 'Kaleidoscope');
             break;
         }
@@ -613,7 +656,7 @@ async function onClick(ev) {
             if (!set) break;
             const copy = { ...set, id: newId(), name: `${set.name} (สำเนา)` };
             s.sets.splice(s.sets.indexOf(set) + 1, 0, copy);
-            save(); render();
+            save(); render(); revealSet(copy.id);
             break;
         }
         case 'set-preview': {
@@ -738,7 +781,10 @@ function onChange(ev) {
     }
     if (el.dataset.dn) {
         const s = settings();
+        const wasReady = timeReady();
         s.dayNight[el.dataset.dn] = el.value || '';
+        // เพิ่งตั้งเวลาครบ = อยากใช้กลางวัน/กลางคืน → เปิดให้กฎสุ่มด้วย (เปลี่ยนกลับเป็น "ทุกเซท" ได้)
+        if (!wasReady && timeReady()) s.rule.byDayNight = true;
         if (!timeReady()) s.rule.byDayNight = false;
         save(); render(); refreshSoon();
         return;

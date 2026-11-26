@@ -225,6 +225,10 @@ html.kls-pal :where(#kls_settings, .kls-popup) :is(.text_pole, textarea, input):
     background: var(--kls-p-surface2, transparent);
     min-width: 0;
 }
+.kls-card.is-new {
+    border-color: var(--kls-p-accent, var(--SmartThemeQuoteColor));
+    box-shadow: 0 0 0 2px var(--kls-p-accent, var(--SmartThemeQuoteColor));
+}
 .kls-card.is-active {
     border-color: var(--kls-p-accent, var(--SmartThemeQuoteColor));
     box-shadow: inset 3px 0 0 var(--kls-p-accent, var(--SmartThemeQuoteColor));

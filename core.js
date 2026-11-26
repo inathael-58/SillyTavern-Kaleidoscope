@@ -1,7 +1,7 @@
 // core.js — การตั้งค่า, การตัดสินเซท และการใส่ธีม/BG ให้ SillyTavern
 import {
     normalizeBound, normalizeRule, normalizeDayNight, dayNightReady, periodAt, forPeriod,
-    resolveLevels, resolveIds, migrateGlobal, defaultRule, newId, TAGS,
+    resolveLevels, resolveIds, migrateGlobal, defaultRule, classifyOpen, newId, TAGS,
 } from './engine.js';
 
 export const MODULE = 'kaleidoscope';
@@ -25,7 +25,7 @@ export function note(kind, msg) {
 
 // ---------------------------------------------------------------- settings
 const DEFAULTS = {
-    version: 2,
+    version: 3,
     enabled: true,
     respectChatBgLock: true,
     liveTime: false,    // เปลี่ยนทันทีเมื่อข้ามกลางวัน/กลางคืน ขณะแชทเปิดค้าง
@@ -36,6 +36,7 @@ const DEFAULTS = {
     dayNight: { day: '', night: '' },
     botState: {},       // botKey → state
     globalState: null,  // state ของกฎสุ่ม
+    lastChat: '',       // แชทที่เปิดล่าสุด (กันการสุ่มใหม่ตอนโหลดหน้าแล้ว ST เปิดแชทเดิม)
     chatState: {},      // `${botKey}|${chatId}` → state
     baseTheme: '',      // ธีมปกติของผู้ใช้ (ใช้คืนเมื่อไม่มีเซทกำหนดธีม)
     appliedTheme: '',   // ธีมที่เราใส่ไว้ล่าสุด ('' = ไม่ได้ใส่)
@@ -84,6 +85,14 @@ export function normalizeAll() {
     for (const k of Object.keys(s.characters)) s.characters[k] = normalizeBound(s.characters[k]);
     s.rule = normalizeRule(s.rule);
     s.dayNight = normalizeDayNight(s.dayNight);
+    // v2 → v3: ตั้งเวลากลางวัน/กลางคืนไว้แล้วแต่กฎสุ่มยังเป็น "ทุกเซท" (ค่าเริ่มต้นเดิม) → เปิดตามกลางวัน/กลางคืนให้
+    if ((Number(s.version) || 1) < 3) {
+        if (dayNightReady(s.dayNight) && !s.rule.byDayNight) {
+            s.rule.byDayNight = true;
+            note('ok', 'เปิดกฎสุ่มตามกลางวัน/กลางคืนให้ (ตั้งเวลาไว้แล้ว)');
+        }
+        s.version = 3;
+    }
 }
 
 export const tagOf = (id) => getSet(id)?.tag || '';
@@ -401,8 +410,9 @@ async function apply(set, level, why = {}) {
 const listeners = new Set();
 export function onStatus(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 
-// กันการสุ่มซ้ำสองรอบตอนเปิดหน้า (APP_READY + CHAT_CHANGED ของแชทเดียวกัน)
-let lastOpen = { key: null, at: 0 };
+// แชทที่เปิดอยู่ล่าสุด — "เปิดแชท" นับเฉพาะตอนเข้าแชทที่ต่างจากแชทนี้
+// null = เพิ่งโหลดหน้า (ใช้ค่าที่จำไว้ใน settings) · '' = อยู่หน้าแรก/ไม่มีแชทเปิดอยู่
+let lastOpened = null;
 
 /**
  * ตัดสินแล้วใส่เซท
@@ -413,11 +423,7 @@ export async function evaluate(trigger = 'refresh') {
     if (!s.enabled) return null;
     try {
         const sc = scope();
-        if (trigger === 'open') {
-            const key = sc.chatKey || '(none)';
-            if (lastOpen.key === key && Date.now() - lastOpen.at < 2000) trigger = 'refresh';
-            lastOpen = { key, at: Date.now() };
-        }
+        if (trigger === 'open') trigger = openTrigger(sc.chatKey);
         // tick: เปลี่ยนได้เฉพาะตอนข้ามกลางวัน/กลางคืน → ไม่ได้ตั้งเวลาไว้ก็ไม่มีอะไรต้องตรวจ
         if (trigger === 'tick' && !timeReady()) return null;
 
@@ -439,6 +445,19 @@ export async function evaluate(trigger = 'refresh') {
         note('error', err?.stack || String(err));
         return null;
     }
+}
+
+/**
+ * ST ส่ง CHAT_CHANGED หลายจังหวะที่ไม่ใช่การเปิดแชท: กลับหน้าแรก (ไม่มีแชท), โหลดหน้าใหม่แล้ว ST เปิดแชทเดิมให้,
+ * เปลี่ยนชื่อแชท ฯลฯ → นับเป็นการเปิดแชท (สุ่มใหม่ได้) เฉพาะตอนเข้าแชทที่ต่างจากแชทที่เปิดอยู่ก่อนหน้า
+ * @returns {'open'|'refresh'}
+ */
+function openTrigger(chatKey) {
+    const s = settings();
+    const r = classifyOpen(chatKey, lastOpened, s.lastChat || '');
+    lastOpened = r.lastOpened;
+    s.lastChat = r.remember;
+    return r.trigger;
 }
 
 /** สุ่มใหม่เฉพาะระดับที่เลือก แล้วตัดสินทั้งหมดอีกรอบ */
