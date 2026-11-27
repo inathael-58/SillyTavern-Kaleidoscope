@@ -1,7 +1,7 @@
 // core.js — การตั้งค่า, การตัดสินเซท และการใส่ธีม/BG ให้ SillyTavern
 import {
     normalizeBound, normalizeRule, normalizeDayNight, dayNightReady, periodAt, forPeriod,
-    resolveLevels, resolveIds, migrateGlobal, defaultRule, classifyOpen, newId, TAGS,
+    resolveLevels, resolveIds, migrateGlobal, defaultRule, classifyOpen, newId, TAGS, minutesOf,
 } from './engine.js';
 
 export const MODULE = 'kaleidoscope';
@@ -25,10 +25,10 @@ export function note(kind, msg) {
 
 // ---------------------------------------------------------------- settings
 const DEFAULTS = {
-    version: 3,
+    version: 4,
     enabled: true,
     respectChatBgLock: true,
-    liveTime: false,    // เปลี่ยนทันทีเมื่อข้ามกลางวัน/กลางคืน ขณะแชทเปิดค้าง
+    liveTime: true,     // เปลี่ยนทันทีเมื่อถึงรอบเวลา/ข้ามกลางวัน-กลางคืน ขณะแชทเปิดค้าง
     notify: false,
     sets: [],
     characters: {},     // 'char:<avatar>' | 'group:<id>' → bound { enabled, entries: [{ setId }] }
@@ -67,7 +67,7 @@ export function normalizeAll() {
         // ติดตั้งใหม่ (ยังไม่มีเซท) → เปิดกฎสุ่มไว้ · ผู้ใช้เดิมที่ไม่เคยตั้งกติกาตามเวลา → ปิดไว้เหมือนเดิม
         if (!s.rule) s.rule = !s.global && !s.sets.length ? defaultRule() : m.rule;
         inRandom = m.inRandom;
-        if (s.global) note('ok', `ย้ายกติกาตามเวลาเดิมเป็นกฎ: ${s.rule.mode}/${s.rule.hours} enabled=${s.rule.enabled}`);
+        if (s.global) note('ok', `ย้ายกติกาตามเวลาเดิมเป็นกฎ: ${s.rule.minutes} นาที enabled=${s.rule.enabled}`);
         delete s.global;
         s.globalState = null;
         s.version = 2;
@@ -92,6 +92,12 @@ export function normalizeAll() {
             note('ok', 'เปิดกฎสุ่มตามกลางวัน/กลางคืนให้ (ตั้งเวลาไว้แล้ว)');
         }
         s.version = 3;
+    }
+    // v3 → v4: เลิกโหมด "สุ่มทุกครั้งที่เปิดแชท" (normalizeRule แปลงเป็นทุก 30 นาทีแล้ว)
+    // เหลือแต่รอบเวลา → เปลี่ยนตามรอบขณะแชทเปิดค้างด้วย ไม่งั้นอยู่แชทเดียวนาน ๆ จะไม่เคยเปลี่ยน
+    if ((Number(s.version) || 1) < 4) {
+        s.liveTime = true;
+        s.version = 4;
     }
 }
 
@@ -358,13 +364,13 @@ function applyTheme(set) {
     if (set?.theme && !wanted) note('warn', `เซท "${set.name}" ใช้ธีม "${set.theme}" ที่ไม่มีแล้ว`);
     const target = wanted || s.baseTheme;
     s.appliedTheme = wanted;
-    if (target && target !== cur) switchTheme(target);
+    return !!target && target !== cur && switchTheme(target);
 }
 
 async function applyBg(set, level) {
     await stBackgrounds();
     const el = document.getElementById('bg1');
-    if (!el) return;
+    if (!el) return false;
     if (bgSnapshot === null) bgSnapshot = el.style.backgroundImage || '';
 
     const s = settings();
@@ -377,11 +383,14 @@ async function applyBg(set, level) {
     // เขียนแบบเดียวกับที่ ST เขียนเอง (ไม่มี !important) — ธีมที่ฝัง BG ไว้ใน custom CSS
     // ด้วย #bg1 { background-image: … !important } จึงชนะทั้ง BG ของ ST และ BG ของเซท เหมือนตอนเลือกธีมเองใน ST
     // (ล้างค่าเก่าก่อน เผื่อเหลือ !important จากเวอร์ชันก่อน)
+    const before = el.style.backgroundImage;
     el.style.removeProperty('background-image');
     const url = useOwn ? own : base.url;
     if (url) el.style.backgroundImage = url;
+    const changed = el.style.backgroundImage !== before;
     bgInfo.themeBg = themeOwnsBg(el);
     setFitting(useOwn && !bgInfo.themeBg ? set.fitting : '');
+    return changed;
 }
 
 /**
@@ -414,12 +423,55 @@ export const status = { level: '', setId: '', setName: '', mode: '', period: '',
 
 function modeOf() {
     const r = settings().rule;
-    return r ? (r.mode === 'interval' ? `interval:${r.hours}` : 'open') : '';
+    return r ? String(minutesOf(r)) : '';
+}
+
+// ---------------------------------------------------------------- วาด blur ใหม่หลังเปลี่ยนธีม
+// Safari/WebKit (ทุกเบราว์เซอร์บน iPhone) วาดพื้นเบลอของ backdrop-filter ไว้ครั้งเดียว แล้วไม่วาดใหม่
+// เมื่อรูปที่อยู่ข้างหลัง (BG / รูปที่ธีมโหลดจากเน็ต) โหลดเสร็จทีหลัง → ข้อความเบลอผิด/ไม่เบลอ
+// จนกว่าจะมีอะไรมากระตุ้น เช่น กดเลือก BG → ปิด backdrop-filter สั้น ๆ 2 เฟรม ให้เบราว์เซอร์วาดใหม่
+// ทันทีหนึ่งรอบ และอีกรอบหลังรูปใน custom CSS ของธีมโหลดเสร็จ
+let nudged = false;
+let repaintSeq = 0;
+
+function repaintBlur() {
+    const b = document.body;
+    if (!b) return;
+    b.classList.add('kls-repaint');
+    void b.offsetHeight;
+    requestAnimationFrame(() => requestAnimationFrame(() => b.classList.remove('kls-repaint')));
+}
+
+/** รูปที่ custom CSS ของธีมใช้ (ไม่รวมฟอนต์และ @import) */
+export function themeImageUrls(css = document.getElementById('custom-style')?.textContent || '') {
+    const body = css.replace(/@import[^;]*;/gi, '').replace(/@font-face\s*\{[^}]*\}/gi, '');
+    const urls = [...body.matchAll(/url\(\s*(['"]?)([^'")]+?)\1\s*\)/gi)].map(m => m[2].trim());
+    return [...new Set(urls)].filter(u => !/^(data|blob):/i.test(u) && !u.startsWith('#')).slice(0, 40);
+}
+
+function loadImage(url) {
+    return new Promise(res => {
+        const img = new Image();
+        img.onload = img.onerror = () => res();
+        img.src = url;
+    });
+}
+
+async function repaintAfterImages() {
+    const seq = ++repaintSeq;
+    repaintBlur();
+    const urls = [...themeImageUrls()];
+    const bg = /url\(["']?(.*?)["']?\)/.exec(document.getElementById('bg1')?.style.backgroundImage || '')?.[1];
+    if (bg) urls.push(bg);
+    if (!urls.length) return;
+    await Promise.race([Promise.allSettled(urls.map(loadImage)), new Promise(r => setTimeout(r, 8000))]);
+    if (seq === repaintSeq) repaintBlur();
 }
 
 async function apply(set, level, why = {}) {
-    applyTheme(set);
-    await applyBg(set, level);
+    const themeChanged = applyTheme(set);
+    const bgChanged = await applyBg(set, level);
+    if (themeChanged || bgChanged || !nudged) { nudged = true; repaintAfterImages(); }
     Object.assign(status, {
         level, setId: set?.id || '', setName: set?.name || '', mode: why.mode || '', period: why.period || '',
         at: Date.now(), trigger: why.trigger || '', note: why.note || '',
@@ -446,7 +498,8 @@ export async function evaluate(trigger = 'refresh') {
         const sc = scope();
         if (trigger === 'open') trigger = openTrigger(sc.chatKey);
         // tick: เปลี่ยนได้เฉพาะตอนข้ามกลางวัน/กลางคืน → ไม่ได้ตั้งเวลาไว้ก็ไม่มีอะไรต้องตรวจ
-        if (trigger === 'tick' && !timeReady()) return null;
+        // ลองเซทอยู่ → ลองต่อจนกว่าจะเข้าแชทใหม่ ไม่ให้รอบเวลามาทับ
+        if (trigger === 'tick' && status.level === 'preview') return null;
 
         const res = resolveLevels(levelList(sc), resolveOpts(trigger));
         if (res?.rolled) setState(res.level, sc, res.state);

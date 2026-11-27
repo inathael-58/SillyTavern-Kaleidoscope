@@ -5,9 +5,9 @@
 //             tag: 'day' | 'night' | '' (ใช้ได้ทั้งคู่) · noRandom: ไม่เอาเข้ากฎสุ่ม
 //   dayNight  ช่วงกลางวัน/กลางคืนของผู้ใช้ { day: 'HH:MM', night: 'HH:MM' }
 //             กลางวัน = day → night, กลางคืน = night → day · ว่างข้างใดข้างหนึ่ง = ไม่ได้ตั้ง (กฎเวลาไม่ทำงาน)
-//   rule      กฎการเปลี่ยนเซท (ใช้กับทุกระดับ) { enabled, mode, hours, byDayNight, noRepeat }
-//             mode 'open'      สุ่มใหม่ทุกครั้งที่เปิดแชท
-//             mode 'interval'  สุ่มใหม่ทุก hours ชม. (1/6/12/24) นับจาก 0:00 ตามนาฬิกาจริง
+//   rule      กฎการเปลี่ยนเซท (ใช้กับทุกระดับ) { enabled, minutes, byDayNight, noRepeat }
+//             minutes          สุ่มใหม่ทุกกี่นาที (15/30/60/360/720/1440) นับจาก 0:00 ตามนาฬิกาจริง
+//                              (เลิกใช้โหมด "สุ่มทุกครั้งที่เปิดแชท" แล้ว — เปลี่ยนธีมทุกครั้งที่เข้าแชททำให้โหลดแชทช้า)
 //             byDayNight       กฎสุ่ม (ระดับล่างสุด) เลือกเฉพาะเซทที่ตรงกับกลางวัน/กลางคืน
 //   bound     เซทที่ผูกกับแชท/บอท { enabled, entries: [{ setId }] }
 //             ชนะกฎสุ่มเสมอ · ใช้ความถี่ของ rule แต่ดูแท็กกลางวัน/กลางคืนเสมอ (ถ้าตั้งเวลาไว้)
@@ -15,12 +15,14 @@
 //   state     ที่สุ่มได้ล่าสุดของระดับนั้น { setId, bucket, pk, at } · pk = จุดเริ่มช่วงกลางวัน/กลางคืน
 //
 // trigger
-//   open     เปิดแชท (หรือโหลดหน้าใหม่) — เวลาเดียวที่ข้ามรอบเวลาแล้วสุ่มใหม่
+//   open     เปิดแชท — สุ่มใหม่ถ้าข้ามรอบเวลา/กลางวัน-กลางคืนไปแล้ว
+//   tick     ตรวจเวลาขณะแชทเปิดค้าง (ตัวเลือก "เปลี่ยนทันที") — เหมือน open
 //   refresh  ผู้ใช้แก้การตั้งค่า — คงของเดิมถ้ายังใช้ได้
-//   tick     ตรวจเวลาขณะแชทเปิดค้าง (ตัวเลือก "เปลี่ยนทันที") — เปลี่ยนเฉพาะตอนข้ามกลางวัน/กลางคืน
 //   force    ผู้ใช้กดสุ่มใหม่
 
-export const RULE_MODES = Object.freeze(['open', 'interval']);
+export const MINUTES = Object.freeze([15, 30, 60, 360, 720, 1440]);
+export const DEFAULT_MINUTES = 30;
+/** HOURS ของเวอร์ชันเก่า (ใช้แปลงข้อมูลเดิม) */
 export const HOURS = Object.freeze([1, 6, 12, 24]);
 export const LEVELS = Object.freeze(['chat', 'bot', 'rule']);
 export const TAGS = Object.freeze(['', 'day', 'night']);
@@ -30,7 +32,7 @@ export function newId() {
 }
 
 export function defaultRule() {
-    return { enabled: true, mode: 'open', hours: 6, byDayNight: false, noRepeat: true };
+    return { enabled: true, minutes: DEFAULT_MINUTES, byDayNight: false, noRepeat: true };
 }
 
 export function defaultBound() {
@@ -110,12 +112,15 @@ function localMinutes(now) {
     return Math.floor((now.getTime() - now.getTimezoneOffset() * 60000) / 60000);
 }
 
-/** รหัสของ "รอบ" ปัจจุบัน — ถ้ารหัสเท่าเดิมและเซทเดิมยังใช้ได้ จะไม่สุ่มใหม่ตอนเปิดแชท */
+export const minutesOf = (rule) => (MINUTES.includes(Number(rule?.minutes)) ? Number(rule.minutes) : DEFAULT_MINUTES);
+
+/** รหัสของ "รอบ" ปัจจุบัน — ถ้ารหัสเท่าเดิมและเซทเดิมยังใช้ได้ จะไม่สุ่มใหม่ */
 export function bucketFor(rule, now, pk = '') {
-    if (rule.mode !== 'interval') return pk ? `o@${pk}` : 'o';
-    const hours = HOURS.includes(Number(rule.hours)) ? Number(rule.hours) : 6;
-    const slot = Math.floor(localMinutes(now) / (hours * 60));
-    return `h${hours}:${slot}${pk ? `@${pk}` : ''}`;
+    const minutes = minutesOf(rule);
+    const slot = Math.floor(localMinutes(now) / minutes);
+    // รอบที่เป็นชั่วโมงเต็มใช้รหัสแบบเดิม (h6:…) เซทที่สุ่มไว้ก่อนอัปเดตจึงไม่ถูกสุ่มใหม่
+    const head = minutes % 60 === 0 ? `h${minutes / 60}` : `m${minutes}`;
+    return `${head}:${slot}${pk ? `@${pk}` : ''}`;
 }
 
 function pick(items, rng) {
@@ -146,9 +151,9 @@ export function resolveIds(ids, state, { rule = defaultRule(), useTags = false, 
 
     let keep = false;
     if (prevOk && trigger !== 'force') {
-        if (trigger === 'open') keep = rule.mode === 'interval' && state?.bucket === bucket;
-        else if (trigger === 'tick') keep = !aware || state?.pk === pk; // เปลี่ยนเฉพาะตอนข้ามกลางวัน/กลางคืน
-        else keep = true; // refresh: ของเดิมยังใช้ได้ ก็คงไว้ (ข้ามรอบเวลาแล้วรอเปิดแชทครั้งถัดไป)
+        // open/tick: สุ่มใหม่เมื่อข้ามรอบเวลาหรือข้ามกลางวัน/กลางคืน (รหัสรอบรวม pk ไว้แล้ว)
+        // refresh: ของเดิมยังใช้ได้ ก็คงไว้
+        keep = trigger === 'refresh' || state?.bucket === bucket;
     }
     if (keep) return { setId: prev, state, rolled: false, changed: false, aware };
 
@@ -187,14 +192,19 @@ export function classifyOpen(chatKey, lastOpened, remembered = '') {
 }
 
 // ---------------------------------------------------------------- normalize / ย้ายข้อมูลเก่า
+/** รับทั้งรูปแบบใหม่ { minutes } และแบบเก่า { mode: 'open'|'interval', hours } */
 export function normalizeRule(rule) {
-    const out = { ...defaultRule(), ...(rule && typeof rule === 'object' ? rule : {}) };
-    if (!RULE_MODES.includes(out.mode)) out.mode = 'open';
-    out.hours = HOURS.includes(Number(out.hours)) ? Number(out.hours) : 6;
-    out.enabled = out.enabled !== false;
-    out.byDayNight = out.byDayNight === true;
-    out.noRepeat = out.noRepeat !== false;
-    return { enabled: out.enabled, mode: out.mode, hours: out.hours, byDayNight: out.byDayNight, noRepeat: out.noRepeat };
+    const src = rule && typeof rule === 'object' ? rule : {};
+    let minutes = Number(src.minutes);
+    if (!MINUTES.includes(minutes)) {
+        minutes = src.mode === 'interval' && HOURS.includes(Number(src.hours)) ? Number(src.hours) * 60 : DEFAULT_MINUTES;
+    }
+    return {
+        enabled: src.enabled !== false,
+        minutes,
+        byDayNight: src.byDayNight === true,
+        noRepeat: src.noRepeat !== false,
+    };
 }
 
 /** รับทั้งรูปแบบใหม่และ pool เก่า (v1: mode/weight/from/to/days) → เก็บแค่เซทที่ผูก */
@@ -223,8 +233,8 @@ export function migrateGlobal(global) {
     if (!global || !entries.length) return { rule: { ...rule, enabled: false }, inRandom: null };
     rule.enabled = global.enabled !== false;
     rule.noRepeat = global.noRepeat !== false;
-    if (global.mode === 'interval') { rule.mode = 'interval'; rule.hours = nearestHours(global.intervalMin); }
-    else if (global.mode === 'daily') { rule.mode = 'interval'; rule.hours = 24; }
-    else rule.mode = 'open';
+    if (global.mode === 'interval') rule.minutes = nearestHours(global.intervalMin) * 60;
+    else if (global.mode === 'daily') rule.minutes = 1440;
+    else rule.minutes = DEFAULT_MINUTES;
     return { rule, inRandom: new Set(entries.map(e => e.setId)) };
 }

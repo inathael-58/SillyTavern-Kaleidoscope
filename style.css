@@ -335,37 +335,6 @@ html.kls-pal :where(#kls_settings, .kls-popup) :is(.text_pole, textarea, input):
 .kls-section { display: flex; flex-direction: column; gap: 6px; }
 .kls-section + .kls-section { padding-top: 8px; border-top: 1px solid var(--SmartThemeBorderColor); }
 
-/* ---------------------------------------------------------------- การ์ดโหมด */
-.kls-modes { display: flex; flex-direction: column; gap: 8px; }
-.kls-mode {
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: var(--kls-r-card);
-    background: var(--kls-p-surface2, transparent);
-    min-width: 0;
-    overflow: hidden;
-}
-.kls-mode.on {
-    border-color: var(--kls-p-accent, var(--SmartThemeQuoteColor));
-    box-shadow: inset 3px 0 0 var(--kls-p-accent, var(--SmartThemeQuoteColor));
-}
-.kls-mode-head {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 10px;
-    border: 0;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-}
-.kls-mode-text { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.kls-mode-text small { opacity: 0.8; }
-.kls-mode.on .kls-mode-radio { color: var(--kls-p-accent-text, var(--SmartThemeQuoteColor)); }
-.kls-mode-body { display: flex; flex-direction: column; gap: 6px; padding: 0 10px 10px; }
-
 /* ---------------------------------------------------------------- ผูกเซทกับแชท/บอท */
 .kls-binds { display: flex; flex-direction: column; gap: 6px; }
 .kls-bind {
@@ -476,4 +445,18 @@ body.reduced-motion :is(.kls-mgr, #kls_settings) {
 @media (prefers-reduced-motion: reduce) {
     :is(.kls-mgr, #kls_settings),
     :is(.kls-mgr, #kls_settings) * { animation: none !important; }
+}
+
+/* ---------------------------------------------------------------- วาด blur ใหม่ (core.js repaintBlur)
+   ปิด backdrop-filter 2 เฟรมให้ WebKit วาดพื้นเบลอใหม่ · :is(*, #id) ทำให้ชนะ !important ของธีมระดับ id ได้ */
+body.kls-repaint :is(*, #kls-repaint-x),
+body.kls-repaint :is(*, #kls-repaint-x)::before,
+body.kls-repaint :is(*, #kls-repaint-x)::after {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+.kls-seg.kls-seg-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border-radius: var(--kls-r-card);
 }

@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     resolveIds, resolveLevels, periodAt, forPeriod, bucketFor, parseHM, dayNightReady,
-    normalizeRule, normalizeBound, migrateGlobal, nearestHours, defaultRule, classifyOpen,
+    normalizeRule, normalizeBound, migrateGlobal, nearestHours, defaultRule, classifyOpen, MINUTES,
 } from '../engine.js';
 
 const at = (h, m = 0, day = 26) => new Date(2026, 10, day, h, m); // 26 พ.ย. 2026
@@ -68,33 +68,59 @@ test('forPeriod: time not set → no filtering (time rule off)', () => {
     assert.equal(r.aware, false);
 });
 
-test('open mode: re-rolls on open, keeps on refresh, avoids repeat', () => {
-    const r = rule({ mode: 'open' });
+test('same slot keeps on open and refresh; force re-rolls and avoids repeat', () => {
+    const r = rule({ minutes: 30 });
     const r1 = resolveIds(['b1', 'b2'], null, opts({ rule: r, rng: () => 0 }));
     assert.equal(r1.setId, 'b1');
-    const r2 = resolveIds(['b1', 'b2'], r1.state, opts({ rule: r, trigger: 'refresh' }));
-    assert.equal(r2.rolled, false);
-    const r3 = resolveIds(['b1', 'b2'], r1.state, opts({ rule: r, rng: () => 0 }));
-    assert.equal(r3.setId, 'b2');
+    assert.equal(resolveIds(['b1', 'b2'], r1.state, opts({ rule: r, trigger: 'refresh' })).rolled, false);
+    assert.equal(resolveIds(['b1', 'b2'], r1.state, opts({ rule: r, rng: () => 0 })).rolled, false);
+    const f = resolveIds(['b1', 'b2'], r1.state, opts({ rule: r, trigger: 'force', rng: () => 0 }));
+    assert.equal(f.setId, 'b2');
+});
+
+test('old rules migrate: open mode → 30 min, interval hours → minutes', () => {
+    assert.equal(normalizeRule({ mode: 'open', hours: 6 }).minutes, 30);
+    assert.equal(normalizeRule({ mode: 'interval', hours: 6 }).minutes, 360);
+    assert.equal(normalizeRule({ minutes: 15, mode: 'interval', hours: 6 }).minutes, 15);
+    assert.equal(normalizeRule({ minutes: 7 }).minutes, 30);
+    assert.deepEqual(Object.keys(normalizeRule({ mode: 'open' })).sort(), ['byDayNight', 'enabled', 'minutes', 'noRepeat']);
+    assert.deepEqual([...MINUTES], [15, 30, 60, 360, 720, 1440]);
+});
+
+test('hour-based buckets keep the old ids so nothing re-rolls after updating', () => {
+    assert.equal(bucketFor(rule({ minutes: 360 }), at(7)), `h6:${Math.floor((at(7).getTime() - at(7).getTimezoneOffset() * 60000) / 60000 / 360)}`);
+    assert.match(bucketFor(rule({ minutes: 15 }), at(7)), /^m15:/);
+});
+
+test('15 and 30 minute buckets', () => {
+    const r15 = rule({ minutes: 15 });
+    assert.equal(bucketFor(r15, at(10, 0)), bucketFor(r15, at(10, 14)));
+    assert.notEqual(bucketFor(r15, at(10, 14)), bucketFor(r15, at(10, 15)));
+    const r30 = rule({ minutes: 30 });
+    assert.equal(bucketFor(r30, at(10, 30)), bucketFor(r30, at(10, 59)));
+    assert.notEqual(bucketFor(r30, at(10, 29)), bucketFor(r30, at(10, 30)));
 });
 
 test('interval buckets start at 0:00 on the real clock', () => {
-    const r6 = rule({ mode: 'interval', hours: 6 });
+    const r6 = rule({ minutes: 360 });
     assert.equal(bucketFor(r6, at(0, 0)), bucketFor(r6, at(5, 59)));
     assert.notEqual(bucketFor(r6, at(5, 59)), bucketFor(r6, at(6, 0)));
-    const r24 = rule({ mode: 'interval', hours: 24 });
+    const r24 = rule({ minutes: 1440 });
     assert.equal(bucketFor(r24, at(0, 1)), bucketFor(r24, at(23, 59)));
     assert.notEqual(bucketFor(r24, at(23, 59)), bucketFor(r24, at(0, 0, 27)));
 });
 
-test('interval: same slot keeps on open, next slot re-rolls on open but not on tick', () => {
-    const r = rule({ mode: 'interval', hours: 1 });
+test('interval: same slot keeps; next slot re-rolls on open and on tick, not on refresh', () => {
+    const r = rule({ minutes: 60 });
     const ids = ['b1', 'b2'];
     const r1 = resolveIds(ids, null, opts({ rule: r, now: at(10, 5), rng: () => 0 }));
     const r2 = resolveIds(ids, r1.state, opts({ rule: r, now: at(10, 55), rng: () => 0.9 }));
     assert.equal(r2.rolled, false);
+    const tickSame = resolveIds(ids, r1.state, opts({ rule: r, now: at(10, 59), trigger: 'tick', rng: () => 0.9 }));
+    assert.equal(tickSame.rolled, false);
     const tick = resolveIds(ids, r1.state, opts({ rule: r, now: at(11, 5), trigger: 'tick', rng: () => 0.9 }));
-    assert.equal(tick.setId, r1.setId); // ข้ามรอบธรรมดา → รอเปิดแชทครั้งถัดไป
+    assert.equal(tick.rolled, true); // เปิด "เปลี่ยนทันที" → ถึงรอบแล้วเปลี่ยนเลย
+    assert.notEqual(tick.setId, r1.setId);
     const refresh = resolveIds(ids, r1.state, opts({ rule: r, now: at(11, 5), trigger: 'refresh' }));
     assert.equal(refresh.setId, r1.setId);
     const r4 = resolveIds(ids, r1.state, opts({ rule: r, now: at(11, 5), rng: () => 0 }));
@@ -103,7 +129,7 @@ test('interval: same slot keeps on open, next slot re-rolls on open but not on t
 });
 
 test('interval 12h + day/night: changes at slot edges and at day/night edges', () => {
-    const r = rule({ mode: 'interval', hours: 12, byDayNight: true });
+    const r = rule({ minutes: 720, byDayNight: true });
     const ids = ['d1', 'd2', 'n1', 'n2'];
     const o = (h, extra = {}) => opts({ rule: r, useTags: true, now: at(h), period: periodAt(DN, at(h)), ...extra });
     const r1 = resolveIds(ids, null, o(13, { rng: () => 0 }));
@@ -120,7 +146,7 @@ test('interval 12h + day/night: changes at slot edges and at day/night edges', (
 });
 
 test('interval 24h + day/night: one day set and one night set per day', () => {
-    const r = rule({ mode: 'interval', hours: 24, byDayNight: true });
+    const r = rule({ minutes: 1440, byDayNight: true });
     const ids = ['d1', 'd2', 'n1', 'n2'];
     const o = (h, extra = {}) => opts({ rule: r, useTags: true, now: at(h), period: periodAt(DN, at(h)), ...extra });
     const day = resolveIds(ids, null, o(9, { rng: () => 0 }));
@@ -129,8 +155,8 @@ test('interval 24h + day/night: one day set and one night set per day', () => {
     assert.equal(TAGS[night.setId], 'night');
 });
 
-test('tick (live switch) changes only when crossing day/night', () => {
-    const r = rule({ mode: 'open' });
+test('tick (live switch) changes when crossing day/night inside one slot', () => {
+    const r = rule({ minutes: 1440 });
     const ids = ['d1', 'n1'];
     const r1 = resolveIds(ids, null, opts({ rule: r, useTags: true, now: at(17, 59), period: periodAt(DN, at(17, 59)) }));
     assert.equal(r1.setId, 'd1');
@@ -141,15 +167,15 @@ test('tick (live switch) changes only when crossing day/night', () => {
     assert.equal(cross.changed, true);
 });
 
-test('tick never re-rolls a list that does not split by day/night', () => {
-    const r = rule({ mode: 'open' });
+test('tick does not re-roll a list that does not split by day/night until the slot ends', () => {
+    const r = rule({ minutes: 1440 });
     const r1 = resolveIds(['d1', 'd2'], null, opts({ rule: r, useTags: true, now: at(17, 59), period: periodAt(DN, at(17, 59)), rng: () => 0 }));
     const r2 = resolveIds(['d1', 'd2'], r1.state, opts({ rule: r, useTags: true, trigger: 'tick', now: at(18, 0), period: periodAt(DN, at(18, 0)), rng: () => 0.9 }));
     assert.equal(r2.setId, r1.setId);
 });
 
 test('priority: chat beats bot beats the random rule, always', () => {
-    const r = rule({ mode: 'open', byDayNight: true });
+    const r = rule({ byDayNight: true });
     const levels = [
         { level: 'chat', ids: ['d1'], state: null, useTags: true },
         { level: 'bot', ids: ['n1'], state: null, useTags: true },
@@ -165,7 +191,7 @@ test('priority: chat beats bot beats the random rule, always', () => {
 });
 
 test('random rule ignores tags unless byDayNight is on', () => {
-    const r = rule({ mode: 'open' });
+    const r = rule();
     const ids = ['d1', 'n1'];
     const at22 = { now: at(22), period: periodAt(DN, at(22)) };
     const plain = resolveLevels([{ level: 'rule', ids, state: null, useTags: false }], opts({ rule: r, ...at22, rng: () => 0 }));
@@ -183,11 +209,11 @@ test('migrating the v1 time-level pool into the rule', () => {
     assert.equal(migrateGlobal(null).rule.enabled, false);
     assert.equal(migrateGlobal(null).inRandom, null);
     const daily = migrateGlobal({ mode: 'daily', entries: [{ setId: 'a' }, { setId: 'z', weight: 0 }] });
-    assert.deepEqual([daily.rule.mode, daily.rule.hours, daily.rule.enabled], ['interval', 24, true]);
+    assert.deepEqual([daily.rule.minutes, daily.rule.enabled], [1440, true]);
     assert.deepEqual([...daily.inRandom], ['a']);
-    assert.equal(migrateGlobal({ mode: 'interval', intervalMin: 180, entries: [{ setId: 'a' }] }).rule.hours, 1);
+    assert.equal(migrateGlobal({ mode: 'interval', intervalMin: 180, entries: [{ setId: 'a' }] }).rule.minutes, 60);
     assert.equal(nearestHours(300), 6);
-    assert.equal(migrateGlobal({ mode: 'time', entries: [{ setId: 'a' }] }).rule.mode, 'open');
+    assert.equal(migrateGlobal({ mode: 'time', entries: [{ setId: 'a' }] }).rule.minutes, 30);
 });
 
 test('only entering a different chat counts as opening a chat', () => {

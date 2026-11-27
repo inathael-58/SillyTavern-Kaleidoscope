@@ -6,26 +6,28 @@ import {
     listThemes, listBackgrounds, bgThumb, setBgCss, setFromCurrent, newSet, restoreBase,
     log, note, EXT_URL, bgModuleLoaded, bgInfo, themeOwnsBg,
 } from './core.js';
-import { newId, HOURS } from './engine.js';
+import { newId, MINUTES, minutesOf } from './engine.js';
 import { pullLatest, serverVersion, compareVersions } from './updater.js';
 
-export const VERSION = '1.3.2';
+export const VERSION = '1.4.0';
 
 const LEVEL_LABEL = { chat: 'แชทนี้', bot: 'บอทนี้', rule: 'กฎสุ่ม', preview: 'ลองใช้' };
 const TAG_LABEL = { '': 'ทั้งคู่', day: 'กลางวัน', night: 'กลางคืน' };
 const TAG_ICON = { '': 'fa-circle-half-stroke', day: 'fa-sun', night: 'fa-moon' };
 const PERIOD_LABEL = { day: 'กลางวัน', night: 'กลางคืน' };
 
+/** 15 → '15 นาที', 360 → '6 ชม.' */
+function minLabel(min) {
+    return min < 60 ? `${min} นาที` : `${min / 60} ชม.`;
+}
+
 function modeLabel(mode) {
-    if (!mode) return '';
-    if (mode === 'open') return 'สุ่มทุกครั้งที่เปิดแชท';
-    const h = Number(String(mode).split(':')[1]) || 6;
-    return `ทุก ${h} ชม.`;
+    const min = Number(mode);
+    return min ? `ทุก ${minLabel(min)}` : '';
 }
 
 function ruleFreqText() {
-    const r = settings().rule;
-    return r.mode === 'interval' ? `ทุก ${r.hours} ชม. (นับจาก 0:00)` : 'สุ่มใหม่ทุกครั้งที่เปิดแชท';
+    return `ทุก ${minLabel(minutesOf(settings().rule))} (นับจาก 0:00)`;
 }
 
 function dnRangeText() {
@@ -100,11 +102,7 @@ export function renderDrawer() {
         s.notify = this.checked; save();
     });
     $root.find('#kls_open').on('click', () => openManager());
-    $root.find('#kls_reroll').on('click', async () => {
-        if (!settings().enabled) return toastr.info('เปิดใช้ Kaleidoscope ก่อน', 'Kaleidoscope');
-        const res = await evaluate('force');
-        if (!res) toastr.info('ยังไม่มีกติกาที่ตรงกับตอนนี้ · กด จัดการเซท เพื่อตั้งค่า', 'Kaleidoscope');
-    });
+    $root.find('#kls_reroll').on('click', rerollNow);
     $root.find('#kls_diag').on('click', async () => {
         $('#kls_diag_box').prop('hidden', false);
         $('#kls_diag_text').val('กำลังรวบรวม…');
@@ -121,6 +119,25 @@ export function renderDrawer() {
     onStatus(updateDrawer);
     updateDrawer();
     checkVersion();
+}
+
+/** สุ่มเซทใหม่ทันที ตามลำดับความสำคัญเดิม (แชทนี้ › บอทนี้ › กฎสุ่ม) */
+let rerolling = false;
+export async function rerollNow() {
+    if (rerolling) return;
+    if (!settings().enabled) { toastr.info('เปิดใช้ Kaleidoscope ก่อน', 'Kaleidoscope'); return; }
+    rerolling = true;
+    try {
+        const prev = status.setId;
+        const res = await evaluate('force');
+        if (!res) { toastr.info('ยังไม่มีเซทที่ใช้ได้ตอนนี้ · กด จัดการเซท เพื่อตั้งค่า', 'Kaleidoscope'); return; }
+        const name = getSet(res.setId)?.name || '';
+        const from = { chat: 'แชทนี้', bot: 'บอทนี้', rule: 'กฎสุ่ม' }[res.level] || '';
+        if (res.setId === prev) toastr.info(`${from}มีเซทเดียว: ${name}`, 'Kaleidoscope', { timeOut: 2500 });
+        else if (!settings().notify) toastr.success(`${name} · จาก${from}`, 'Kaleidoscope', { timeOut: 2500 });
+    } finally {
+        rerolling = false;
+    }
 }
 
 // ---------------------------------------------------------------- ดึงเวอร์ชัน
@@ -195,7 +212,7 @@ function offPeriodReason() {
     const now = PERIOD_LABEL[per.period];
     const waiting = settings().liveTime
         ? 'กำลังจะเปลี่ยนในไม่ช้า'
-        : 'จะเปลี่ยนตอนเปิดแชทครั้งถัดไป (หรือเปิด “เปลี่ยนทันทีเมื่อเข้ากลางวัน/กลางคืน” ในแท็บกฎการเปลี่ยน)';
+        : 'จะเปลี่ยนตอนเปิดแชทครั้งถัดไป (หรือเปิด “เปลี่ยนทันทีเมื่อถึงรอบ” ในแท็บกฎการเปลี่ยน)';
     if (status.level === 'chat' || status.level === 'bot') {
         if (boundMissing(status.level)) return `ตอนนี้เป็น${now} แต่${LEVEL_LABEL[status.level]}ผูกไว้แต่เซท${TAG_LABEL[tag]} จึงชนะกฎเวลา`;
         return `ตอนนี้เป็น${now}แล้ว · ${waiting}`;
@@ -536,8 +553,6 @@ function renderRule() {
   ${ready
         ? `<div class="kls-note"><i class="fa-solid ${per.period === 'day' ? 'fa-sun' : 'fa-moon'}"></i><span>ตอนนี้เป็น<b>${PERIOD_LABEL[per.period]}</b> · ${esc(dnRangeText())}</span></div>`
         : `<div class="kls-note kls-warn-note"><i class="fa-solid fa-clock"></i><span>${dn.day && dn.night ? 'เวลากลางวันกับกลางคืนต้องไม่ซ้ำกัน' : 'ยังไม่ได้ตั้งเวลา'} · <b>กฎเวลาจะไม่ทำงาน</b> แท็กกลางวัน/กลางคืนของเซทจะยังไม่มีผล</span></div>`}
-  <label class="checkbox_label ${ready ? '' : 'kls-dim'}"><input type="checkbox" data-rule="liveTime" ${s.liveTime ? 'checked' : ''} ${ready ? '' : 'disabled'}><span>เปลี่ยนทันทีเมื่อเข้ากลางวัน/กลางคืน</span></label>
-  <small class="kls-hint">ขณะแชทเปิดค้าง · ถ้าปิดไว้ หรือเป็นการข้ามรอบเวลาธรรมดา จะรอเปลี่ยนตอนเปิดแชทครั้งถัดไป</small>
   ${dn.day || dn.night ? '<div class="kls-toolbar"><button type="button" class="menu_button kls-btn" data-act="dn-clear"><i class="fa-solid fa-eraser"></i><span>ล้างเวลา</span></button></div>' : ''}
 </div>`;
 
@@ -548,25 +563,16 @@ function renderRule() {
 </div>
 ${ready ? '' : '<small class="kls-hint">ตั้งเวลากลางวัน/กลางคืนด้านบนก่อน ถึงจะเลือกตามกลางวัน/กลางคืนได้</small>'}`;
 
-    const card = (mode, icon, title, desc, body) => `
-<div class="kls-mode ${r.mode === mode ? 'on' : ''}">
-  <button type="button" class="kls-mode-head" data-act="rule-mode" data-mode="${mode}" aria-pressed="${r.mode === mode}">
-    <i class="fa-solid ${icon}"></i>
-    <span class="kls-mode-text"><b>${title}</b><small>${desc}</small></span>
-    <i class="fa-solid ${r.mode === mode ? 'fa-circle-dot' : 'fa-circle'} kls-mode-radio"></i>
-  </button>
-  ${r.mode === mode ? `<div class="kls-mode-body">${body}</div>` : ''}
-</div>`;
-
-    const hoursSeg = `
-<div class="kls-seg" role="group" aria-label="ทุกกี่ชั่วโมง">${HOURS.map(h => `
-  <button type="button" class="kls-segbtn ${r.hours === h ? 'on' : ''}" data-act="rule-hours" data-val="${h}" aria-pressed="${r.hours === h}"><span>${h} ชม.</span></button>`).join('')}
+    const cur = minutesOf(r);
+    const minSeg = `
+<div class="kls-seg kls-seg-grid" role="group" aria-label="เปลี่ยนเซททุก">${MINUTES.map(m => `
+  <button type="button" class="kls-segbtn ${cur === m ? 'on' : ''}" data-act="rule-minutes" data-val="${m}" aria-pressed="${cur === m}"><span>${minLabel(m)}</span></button>`).join('')}
 </div>
-<small class="kls-hint">นับจาก 0:00 ตามนาฬิกาจริง${r.hours < 24 ? ` (${Array.from({ length: 24 / r.hours }, (_, i) => `${String(i * r.hours).padStart(2, '0')}:00`).slice(0, 6).join(', ')}${24 / r.hours > 6 ? ' …' : ''})` : ' · วันละครั้ง'} · ข้ามรอบแล้วจะเปลี่ยนตอนเปิดแชทครั้งถัดไป</small>`;
+<small class="kls-hint">นับจาก 0:00 ตามนาฬิกาจริง${cur < 1440 ? ` (${Array.from({ length: 4 }, (_, i) => { const t = i * cur; return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; }).join(', ')} …)` : ' · วันละครั้ง'} · เข้าแชทใหม่ไม่ได้สุ่มใหม่ เปลี่ยนเมื่อถึงรอบเท่านั้น</small>`;
 
     let poolWarn = '';
     const tagged = pool.some(id => tagOf(id));
-    if (r.enabled && ready && !r.byDayNight && tagged) poolWarn = '<div class="kls-note kls-warn-note"><i class="fa-solid fa-triangle-exclamation"></i><span>กฎสุ่มตั้งเป็น <b>ทุกเซท</b> อยู่ · เซทกลางวันออกตอนกลางคืนได้ (และกลับกัน) · เลือก <b>ตามกลางวัน/กลางคืน</b> ในโหมดด้านบนถ้าอยากให้ตามเวลา</span></div>';
+    if (r.enabled && ready && !r.byDayNight && tagged) poolWarn = '<div class="kls-note kls-warn-note"><i class="fa-solid fa-triangle-exclamation"></i><span>กฎสุ่มตั้งเป็น <b>ทุกเซท</b> อยู่ · เซทกลางวันออกตอนกลางคืนได้ (และกลับกัน) · เลือก <b>ตามกลางวัน/กลางคืน</b> ด้านบนถ้าอยากให้ตามเวลา</span></div>';
     else if (r.enabled && !pool.length) poolWarn = '<div class="kls-note kls-warn-note"><i class="fa-solid fa-triangle-exclamation"></i><span>ไม่มีเซทที่เข้ากฎสุ่ม · แชทที่ไม่ได้ผูกเซทจะใช้ธีมและ BG ปกติ</span></div>';
     else if (r.enabled && r.byDayNight && ready) {
         const day = pool.filter(id => tagOf(id) !== 'night').length;
@@ -578,11 +584,12 @@ ${ready ? '' : '<small class="kls-hint">ตั้งเวลากลางว�
 <div class="kls-note kls-key-note"><i class="fa-solid fa-crown"></i><span>เซทที่ผูกไว้<b>รายแชท</b>และ<b>รายบอท</b> จะเอาชนะกฎสุ่มเสมอ · กฎนี้สุ่มให้แชทที่ไม่ได้ผูกเซท และความถี่ในการเปลี่ยนด้านล่างใช้กับเซทที่ผูกไว้ด้วย</span></div>
 ${dnBox}
 <div class="kls-section">
-  <div class="kls-subhead">โหมดการเปลี่ยนเซท</div>
-  <div class="kls-modes">
-    ${card('open', 'fa-door-open', 'สุ่มใหม่ทุกครั้งที่เปิดแชท', 'เข้าแชทเมื่อไรก็ได้เซทใหม่', dnSeg)}
-    ${card('interval', 'fa-clock-rotate-left', 'ตามรอบเวลา', 'ทุก 1 / 6 / 12 / 24 ชม. ตามนาฬิกา', hoursSeg + dnSeg)}
-  </div>
+  <div class="kls-subhead">เปลี่ยนเซททุก</div>
+  ${minSeg}
+  <label class="checkbox_label"><input type="checkbox" data-rule="liveTime" ${s.liveTime ? 'checked' : ''}><span>เปลี่ยนทันทีเมื่อถึงรอบ</span></label>
+  <small class="kls-hint">ขณะแชทเปิดค้าง (รวมตอนข้ามกลางวัน/กลางคืน) · ปิดไว้ = รอเปลี่ยนตอนเปิดแชทครั้งถัดไปหลังถึงรอบ</small>
+  <div class="kls-subhead">กฎสุ่มเลือกจาก</div>
+  ${dnSeg}
   <label class="checkbox_label"><input type="checkbox" data-rule="noRepeat" ${r.noRepeat ? 'checked' : ''}><span>ไม่ซ้ำเซทเดิมติดกัน</span></label>
 </div>
 <div class="kls-section">
@@ -712,12 +719,8 @@ async function onClick(ev) {
             render(); refreshSoon();
             break;
         }
-        case 'rule-mode':
-            s.rule.mode = btn.dataset.mode === 'interval' ? 'interval' : 'open';
-            save(); render(); refreshSoon();
-            break;
-        case 'rule-hours':
-            s.rule.hours = HOURS.includes(Number(btn.dataset.val)) ? Number(btn.dataset.val) : 6;
+        case 'rule-minutes':
+            s.rule.minutes = MINUTES.includes(Number(btn.dataset.val)) ? Number(btn.dataset.val) : minutesOf(s.rule);
             save(); render(); refreshSoon();
             break;
         case 'rule-dn':
