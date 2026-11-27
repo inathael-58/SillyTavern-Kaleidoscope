@@ -4,12 +4,12 @@ import {
     getPool, ensurePool, savePool, clearPool, getSet, usageOf, removeSetEverywhere,
     timeReady, currentPeriod, boundMissing, randomIds, tagOf,
     listThemes, listBackgrounds, bgThumb, setBgCss, setFromCurrent, newSet, restoreBase,
-    log, note, EXT_URL, bgModuleLoaded, bgInfo,
+    log, note, EXT_URL, bgModuleLoaded, bgInfo, themeOwnsBg,
 } from './core.js';
 import { newId, HOURS } from './engine.js';
 import { pullLatest, serverVersion, compareVersions } from './updater.js';
 
-export const VERSION = '1.3.1';
+export const VERSION = '1.3.2';
 
 const LEVEL_LABEL = { chat: 'แชทนี้', bot: 'บอทนี้', rule: 'กฎสุ่ม', preview: 'ลองใช้' };
 const TAG_LABEL = { '': 'ทั้งคู่', day: 'กลางวัน', night: 'กลางคืน' };
@@ -133,7 +133,6 @@ function verLine(text, kind = '') {
         .text(text);
 }
 
-let staleToastShown = false;
 async function checkVersion() {
     try {
         const server = await serverVersion();
@@ -142,13 +141,8 @@ async function checkVersion() {
             .toggleClass('kls-warn', stale)
             .text(stale ? `v${VERSION} → v${server}` : `v${VERSION}`)
             .attr('title', stale ? `บนเซิร์ฟเวอร์เป็น v${server} แล้ว แต่หน้านี้ยังรัน v${VERSION}` : '');
-        verLine(stale ? `ติดตั้ง v${server} ไว้แล้ว แต่หน้านี้ยังรัน v${VERSION} · กด ดึงเวอร์ชันล่าสุด` : '', stale ? 'warn' : '');
-        if (stale && !staleToastShown) {
-            staleToastShown = true;
-            toastr.info(`ติดตั้ง v${server} ไว้แล้ว แต่หน้านี้ยังรัน v${VERSION} · แตะเพื่อโหลดตัวใหม่`, 'Kaleidoscope', {
-                timeOut: 0, extendedTimeOut: 0, closeButton: true, onclick: () => onUpdateClick(),
-            });
-        }
+        // แสดงแค่ในแผง ไม่เด้งแจ้งเตือน — ST แจ้งเรื่องอัปเดต extension เองตอนโหลดอยู่แล้ว
+        verLine(stale ? `ติดตั้ง v${server} ไว้แล้ว แต่หน้านี้ยังรัน v${VERSION} · โหลดหน้าใหม่เพื่อใช้ตัวใหม่` : '', stale ? 'warn' : '');
     } catch { /* ออฟไลน์ ก็แสดงแค่เวอร์ชันที่รันอยู่ */ }
 }
 
@@ -169,9 +163,7 @@ async function onUpdateClick() {
         const what = `v${res.to}${res.commit ? ` (${res.commit})` : ''}`;
         $('#kls_vertag').addClass('kls-warn').text(`v${VERSION} → v${res.to}`);
         verLine(`ดึง ${what} แล้ว · โหลดหน้าใหม่เพื่อใช้งาน`, 'warn');
-        const c = ctx();
-        const ok = await c.Popup.show.confirm('ดึงเวอร์ชันใหม่แล้ว', `Kaleidoscope ${what} · โหลดหน้าใหม่ตอนนี้เลยไหม`, { okButton: 'โหลดหน้าใหม่', cancelButton: 'ไว้ทีหลัง' });
-        if (ok === c.POPUP_RESULT.AFFIRMATIVE) location.reload();
+        toastr.success(`ดึง ${what} แล้ว · โหลดหน้าใหม่เพื่อใช้งาน`, 'Kaleidoscope');
     } catch (err) {
         verLine(String(err?.message || err), 'bad');
         toastr.error(String(err?.message || err), 'Kaleidoscope');
@@ -188,7 +180,9 @@ export function statusText() {
     if (status.level === 'preview') return `กำลังลองเซท <b>${esc(status.setName)}</b> · กลับเป็นปกติเมื่อเข้าแชทใหม่`;
     if (!status.setId) return 'ไม่มีกติกาที่ตรงกับตอนนี้ · ใช้ธีมและ BG ปกติ';
     const mode = (status.mode ? ` · ${modeLabel(status.mode)}` : '') + (status.period ? ` · ${PERIOD_LABEL[status.period]}` : '');
-    const lock = bgInfo.blockedByLock ? '<br><span class="kls-muted">BG ของแชทนี้ถูกล็อกไว้ด้วยปุ่มของ ST จึงใช้ BG ที่ล็อกแทน (ปิด “เคารพ BG ที่ล็อกกับแชท” ถ้าอยากให้เซทชนะ)</span>' : '';
+    const lock = bgInfo.themeBg
+        ? '<br><span class="kls-muted">ธีมนี้มี BG ในตัว จึงใช้ภาพของธีมแทน BG ของเซท</span>'
+        : bgInfo.blockedByLock ? '<br><span class="kls-muted">BG ของแชทนี้ถูกล็อกไว้ด้วยปุ่มของ ST จึงใช้ BG ที่ล็อกแทน (ปิด “เคารพ BG ที่ล็อกกับแชท” ถ้าอยากให้เซทชนะ)</span>' : '';
     const why = offPeriodReason();
     return `ใช้อยู่: <b>${esc(status.setName)}</b><br><span class="kls-muted">จาก${LEVEL_LABEL[status.level] || status.level}${mode}</span>${lock}${why ? `<br><span class="kls-muted"><i class="fa-solid fa-circle-info"></i> ${why}</span>` : ''}`;
 }
@@ -383,6 +377,7 @@ function renderSets() {
   </div>
   <div class="kls-row"><span>ธีม</span><select data-field="theme">${themeOptions(set.theme)}</select></div>
   <div class="kls-row"><span>BG</span><button type="button" class="kls-linkbtn" data-act="bg-pick">${esc(bgLabel(set))}</button></div>
+  ${active && bgInfo.themeBg ? '<small class="kls-hint">ธีมของเซทนี้มี BG ในตัว จึงแสดงภาพของธีมแทน BG ที่เลือก</small>' : ''}
   <div class="kls-stack"><span>ใช้ช่วงไหน</span>${tagSeg(set.tag)}</div>
   <label class="checkbox_label"><input type="checkbox" data-setflag="noRandom" ${set.noRandom ? 'checked' : ''}><span>ไม่เอาเซทนี้เข้ากฎสุ่ม</span></label>
   <div class="kls-row"><span>การวางภาพ</span><select data-field="fitting">${Object.entries(FIT_LABEL).map(([k, v]) => `<option value="${k}" ${k === set.fitting ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
@@ -834,7 +829,12 @@ export async function diagnose() {
     lines.push(`status: level=${status.level || '-'} set=${status.setName || '-'} trigger=${status.trigger}`);
     lines.push(`theme: current=${c.powerUserSettings?.theme} base=${s.baseTheme} applied=${s.appliedTheme || '-'} themes=${listThemes().length}`);
     lines.push(`bg1: ${bg1 ? bg1.style.backgroundImage || '(none)' : 'missing'} ${bg1?.style.getPropertyPriority('background-image') || ''} class=${bg1?.className || ''}`);
-    if (bg1) lines.push(`bg1 computed: ${getComputedStyle(bg1).backgroundImage} · blockedByLock=${bgInfo.blockedByLock}`);
+    if (bg1) lines.push(`bg1 computed: ${getComputedStyle(bg1).backgroundImage} · blockedByLock=${bgInfo.blockedByLock} themeBg=${themeOwnsBg(bg1)}`);
+    const pu = c.powerUserSettings || {};
+    const mes = document.querySelector('#chat .mes');
+    lines.push(`blur: strength=${pu.blur_strength} css=${getComputedStyle(document.documentElement).getPropertyValue('--blurStrength').trim() || '-'} fastUI=${document.body.classList.contains('no-blur')} chat_display=${pu.chat_display}`);
+    lines.push(`blur tint: ui=${pu.blur_tint_color} user=${pu.user_mes_blur_tint_color} bot=${pu.bot_mes_blur_tint_color}`);
+    if (mes) { const cs = getComputedStyle(mes); lines.push(`.mes: backdrop=${cs.backdropFilter || cs.webkitBackdropFilter || '-'} bg=${cs.backgroundColor}`); }
     lines.push(`st lock: ${c.chatMetadata?.custom_background || '-'} · bgModule=${bgModuleLoaded()}`);
     lines.push('log:');
     lines.push(...log.slice(-20).map(x => '  ' + x));

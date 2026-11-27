@@ -374,20 +374,41 @@ async function applyBg(set, level) {
     const blockedByLock = !!own && base.locked && s.respectChatBgLock && level !== 'chat' && level !== 'preview';
     const useOwn = !!own && !blockedByLock;
     bgInfo.blockedByLock = blockedByLock;
-    if (useOwn) {
-        // !important: ธีมที่มี custom CSS แบบ #bg1 { background-image: … !important } จะทับ BG ของเซทไม่ได้
-        // (ST เขียน #bg1 ทีหลังได้ตามปกติ เพราะ jQuery .css เขียนทับค่า inline เดิม)
-        el.style.setProperty('background-image', own, 'important');
-    } else {
-        // คืนให้ ST/ธีมคุมตามเดิม — ล้าง !important ของเราออกก่อน
-        el.style.removeProperty('background-image');
-        if (base.url) el.style.backgroundImage = base.url;
-    }
-    setFitting(useOwn ? set.fitting : '');
+    // เขียนแบบเดียวกับที่ ST เขียนเอง (ไม่มี !important) — ธีมที่ฝัง BG ไว้ใน custom CSS
+    // ด้วย #bg1 { background-image: … !important } จึงชนะทั้ง BG ของ ST และ BG ของเซท เหมือนตอนเลือกธีมเองใน ST
+    // (ล้างค่าเก่าก่อน เผื่อเหลือ !important จากเวอร์ชันก่อน)
+    el.style.removeProperty('background-image');
+    const url = useOwn ? own : base.url;
+    if (url) el.style.backgroundImage = url;
+    bgInfo.themeBg = themeOwnsBg(el);
+    setFitting(useOwn && !bgInfo.themeBg ? set.fitting : '');
 }
 
-/** ผลการใส่ BG ล่าสุด (ใช้แสดงสถานะ/ตรวจสอบ) */
-export const bgInfo = { blockedByLock: false };
+/**
+ * custom CSS ของธีมที่ใช้อยู่ตั้ง BG ของ #bg1 แบบ !important ไหม (= ธีมมี BG ในตัว ทับ BG ของ ST/เซท)
+ * อ่านจากกฎ CSS ตรง ๆ ไม่ใช้ getComputedStyle เพราะ #bg1 มี transition ของ background-image
+ */
+export function themeOwnsBg(el = document.getElementById('bg1')) {
+    const sheet = document.getElementById('custom-style')?.sheet;
+    if (!el || !sheet) return false;
+    const hit = (rules) => {
+        for (const r of Array.from(rules || [])) {
+            try {
+                if (r.media && !matchMedia(r.media.mediaText || 'all').matches) continue;
+                if (typeof CSSSupportsRule !== 'undefined' && r instanceof CSSSupportsRule && !CSS.supports(r.conditionText)) continue;
+                if (r.selectorText && r.style && el.matches(r.selectorText)
+                    && r.style.getPropertyPriority('background-image') === 'important'
+                    && r.style.getPropertyValue('background-image').trim() !== 'none') return true;
+                if (r.cssRules && hit(r.cssRules)) return true;
+            } catch { /* selector ที่เบราว์เซอร์ไม่รู้จัก */ }
+        }
+        return false;
+    };
+    try { return hit(sheet.cssRules); } catch { return false; }
+}
+
+/** ผลการใส่ BG ล่าสุด (ใช้แสดงสถานะ/ตรวจสอบ) · themeBg = ธีมใช้ BG ที่ฝังมาในตัว */
+export const bgInfo = { blockedByLock: false, themeBg: false };
 
 export const status = { level: '', setId: '', setName: '', mode: '', period: '', at: 0, trigger: '', note: '' };
 
@@ -507,7 +528,8 @@ export async function restoreBase() {
 export function setFromCurrent() {
     const power = ctx().powerUserSettings;
     const el = document.getElementById('bg1');
-    const css = el?.style.backgroundImage || '';
+    // ธีมมี BG ในตัว → BG ของ ST ที่ค้างอยู่ใน #bg1 มองไม่เห็นอยู่แล้ว เก็บเป็น "BG ปกติ" ให้ธีมใช้ภาพของตัวเอง
+    const css = themeOwnsBg(el) ? '' : el?.style.backgroundImage || '';
     let bg = '';
     let bgCustom = '';
     const m = /url\(["']?(.*?)["']?\)/.exec(css);
