@@ -2,7 +2,7 @@
 import {
     ctx, settings, normalizeAll, evaluate, preview, status, getSet, note, onCharacterRenamed,
 } from './core.js';
-import { renderDrawer, openManager, diagnose, managerOpen } from './ui.js';
+import { renderDrawer, openManager, diagnose, managerOpen, rerollNow } from './ui.js';
 import { installThemePalette } from './theme-palette.js';
 
 let tickTimer = null;
@@ -16,16 +16,22 @@ function startTick() {
     }, 30000);
 }
 
+function wandItem(id, icon, label, onClick) {
+    const item = document.createElement('div');
+    item.id = id;
+    item.className = 'list-group-item flex-container flexGap5 interactable';
+    item.tabIndex = 0;
+    item.innerHTML = `<div class="fa-solid ${icon} extensionsMenuExtensionButton"></div><span>${label}</span>`;
+    item.addEventListener('click', onClick);
+    item.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } });
+    return item;
+}
+
 function addWandItem() {
     const menu = document.getElementById('extensionsMenu');
     if (!menu || document.getElementById('kls_wand')) return;
-    const item = document.createElement('div');
-    item.id = 'kls_wand';
-    item.className = 'list-group-item flex-container flexGap5 interactable';
-    item.tabIndex = 0;
-    item.innerHTML = '<div class="fa-solid fa-shapes extensionsMenuExtensionButton"></div><span>Kaleidoscope</span>';
-    item.addEventListener('click', () => openManager());
-    menu.appendChild(item);
+    menu.appendChild(wandItem('kls_wand_reroll', 'fa-shuffle', 'สุ่มธีมใหม่', rerollNow));
+    menu.appendChild(wandItem('kls_wand', 'fa-shapes', 'Kaleidoscope', () => openManager()));
 }
 
 function registerCommands() {
