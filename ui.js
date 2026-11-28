@@ -9,7 +9,7 @@ import {
 import { newId, MINUTES, minutesOf } from './engine.js';
 import { pullLatest, serverVersion, compareVersions } from './updater.js';
 
-export const VERSION = '1.4.0';
+export const VERSION = '1.5.0';
 
 const LEVEL_LABEL = { chat: 'แชทนี้', bot: 'บอทนี้', rule: 'กฎสุ่ม', preview: 'ลองใช้' };
 const TAG_LABEL = { '': 'ทั้งคู่', day: 'กลางวัน', night: 'กลางคืน' };
@@ -22,11 +22,13 @@ function minLabel(min) {
 }
 
 function modeLabel(mode) {
+    if (mode === 'manual') return 'เปลี่ยนเมื่อกดสุ่ม';
     const min = Number(mode);
     return min ? `ทุก ${minLabel(min)}` : '';
 }
 
 function ruleFreqText() {
+    if (settings().rule.manual) return 'เปลี่ยนเมื่อกด สุ่มธีมใหม่ เท่านั้น';
     return `ทุก ${minLabel(minutesOf(settings().rule))} (นับจาก 0:00)`;
 }
 
@@ -210,7 +212,9 @@ function offPeriodReason() {
     const tag = tagOf(status.setId);
     if (!per || !tag || tag === per.period) return '';
     const now = PERIOD_LABEL[per.period];
-    const waiting = settings().liveTime
+    const waiting = settings().rule.manual
+        ? 'กด สุ่มธีมใหม่ ในเมนูไม้กายสิทธิ์เพื่อเปลี่ยน (โหมดกดเอง)'
+        : settings().liveTime
         ? 'กำลังจะเปลี่ยนในไม่ช้า'
         : 'จะเปลี่ยนตอนเปิดแชทครั้งถัดไป (หรือเปิด “เปลี่ยนทันทีเมื่อถึงรอบ” ในแท็บกฎการเปลี่ยน)';
     if (status.level === 'chat' || status.level === 'bot') {
@@ -584,11 +588,17 @@ ${ready ? '' : '<small class="kls-hint">ตั้งเวลากลางว�
 <div class="kls-note kls-key-note"><i class="fa-solid fa-crown"></i><span>เซทที่ผูกไว้<b>รายแชท</b>และ<b>รายบอท</b> จะเอาชนะกฎสุ่มเสมอ · กฎนี้สุ่มให้แชทที่ไม่ได้ผูกเซท และความถี่ในการเปลี่ยนด้านล่างใช้กับเซทที่ผูกไว้ด้วย</span></div>
 ${dnBox}
 <div class="kls-section">
+  <div class="kls-subhead">เปลี่ยนเซทเมื่อไร</div>
+  <div class="kls-seg" role="group" aria-label="เปลี่ยนเซทเมื่อไร">
+    <button type="button" class="kls-segbtn ${!r.manual ? 'on' : ''}" data-act="rule-manual" data-val="0" aria-pressed="${!r.manual}"><i class="fa-solid fa-clock-rotate-left"></i><span>ตามเวลา</span></button>
+    <button type="button" class="kls-segbtn ${r.manual ? 'on' : ''}" data-act="rule-manual" data-val="1" aria-pressed="${r.manual}"><i class="fa-solid fa-hand-pointer"></i><span>กดเอง</span></button>
+  </div>
+  ${r.manual ? `<small class="kls-hint">เปลี่ยนเฉพาะตอนกด <b>สุ่มธีมใหม่</b> ในเมนูไม้กายสิทธิ์ (หรือปุ่ม สุ่มใหม่ ในแผง Extensions) · เปิดแชท ถึงรอบ หรือข้ามกลางวัน/กลางคืน จะไม่เปลี่ยนเอง · ลำดับความสำคัญยังเหมือนเดิม</small>` : `
   <div class="kls-subhead">เปลี่ยนเซททุก</div>
   ${minSeg}
   <label class="checkbox_label"><input type="checkbox" data-rule="liveTime" ${s.liveTime ? 'checked' : ''}><span>เปลี่ยนทันทีเมื่อถึงรอบ</span></label>
-  <small class="kls-hint">ขณะแชทเปิดค้าง (รวมตอนข้ามกลางวัน/กลางคืน) · ปิดไว้ = รอเปลี่ยนตอนเปิดแชทครั้งถัดไปหลังถึงรอบ</small>
-  <div class="kls-subhead">กฎสุ่มเลือกจาก</div>
+  <small class="kls-hint">ขณะแชทเปิดค้าง (รวมตอนข้ามกลางวัน/กลางคืน) · ปิดไว้ = รอเปลี่ยนตอนเปิดแชทครั้งถัดไปหลังถึงรอบ</small>`}
+  <div class="kls-subhead">${r.manual ? 'กดสุ่มแล้วเลือกจาก' : 'กฎสุ่มเลือกจาก'}</div>
   ${dnSeg}
   <label class="checkbox_label"><input type="checkbox" data-rule="noRepeat" ${r.noRepeat ? 'checked' : ''}><span>ไม่ซ้ำเซทเดิมติดกัน</span></label>
 </div>
@@ -719,6 +729,10 @@ async function onClick(ev) {
             render(); refreshSoon();
             break;
         }
+        case 'rule-manual':
+            s.rule.manual = btn.dataset.val === '1';
+            save(); render(); refreshSoon();
+            break;
         case 'rule-minutes':
             s.rule.minutes = MINUTES.includes(Number(btn.dataset.val)) ? Number(btn.dataset.val) : minutesOf(s.rule);
             save(); render(); refreshSoon();

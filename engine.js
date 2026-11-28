@@ -5,8 +5,10 @@
 //             tag: 'day' | 'night' | '' (ใช้ได้ทั้งคู่) · noRandom: ไม่เอาเข้ากฎสุ่ม
 //   dayNight  ช่วงกลางวัน/กลางคืนของผู้ใช้ { day: 'HH:MM', night: 'HH:MM' }
 //             กลางวัน = day → night, กลางคืน = night → day · ว่างข้างใดข้างหนึ่ง = ไม่ได้ตั้ง (กฎเวลาไม่ทำงาน)
-//   rule      กฎการเปลี่ยนเซท (ใช้กับทุกระดับ) { enabled, minutes, byDayNight, noRepeat }
-//             minutes          สุ่มใหม่ทุกกี่นาที (15/30/60/360/720/1440) นับจาก 0:00 ตามนาฬิกาจริง
+//   rule      กฎการเปลี่ยนเซท (ใช้กับทุกระดับ) { enabled, manual, minutes, byDayNight, noRepeat }
+//             manual           เปลี่ยนเฉพาะตอนกด "สุ่มธีมใหม่" — เปิดแชท/ถึงรอบ/ข้ามกลางวัน-กลางคืน ไม่เปลี่ยนเอง
+//                              (byDayNight / แท็กของเซทยังใช้เลือกว่าจะสุ่มจากกลุ่มไหนตอนกด)
+//             minutes          สุ่มใหม่ทุกกี่นาที (15/30/60/360/720/1440) นับจาก 0:00 ตามนาฬิกาจริง (เมื่อไม่ใช่ manual)
 //                              (เลิกใช้โหมด "สุ่มทุกครั้งที่เปิดแชท" แล้ว — เปลี่ยนธีมทุกครั้งที่เข้าแชททำให้โหลดแชทช้า)
 //             byDayNight       กฎสุ่ม (ระดับล่างสุด) เลือกเฉพาะเซทที่ตรงกับกลางวัน/กลางคืน
 //   bound     เซทที่ผูกกับแชท/บอท { enabled, entries: [{ setId }] }
@@ -32,7 +34,7 @@ export function newId() {
 }
 
 export function defaultRule() {
-    return { enabled: true, minutes: DEFAULT_MINUTES, byDayNight: false, noRepeat: true };
+    return { enabled: true, manual: false, minutes: DEFAULT_MINUTES, byDayNight: false, noRepeat: true };
 }
 
 export function defaultBound() {
@@ -147,13 +149,15 @@ export function resolveIds(ids, state, { rule = defaultRule(), useTags = false, 
     const bucket = bucketFor(rule, now, pk);
 
     const prev = state?.setId || '';
-    const prevOk = !!prev && list.includes(prev);
+    const manual = rule.manual === true;
+    // manual: เซทเดิมยังอยู่ในรายการ (แม้ไม่ตรงกลางวัน/กลางคืนแล้ว) ก็คงไว้ จนกว่าผู้ใช้จะกดสุ่ม
+    const prevOk = !!prev && (manual ? ids.includes(prev) : list.includes(prev));
 
     let keep = false;
     if (prevOk && trigger !== 'force') {
         // open/tick: สุ่มใหม่เมื่อข้ามรอบเวลาหรือข้ามกลางวัน/กลางคืน (รหัสรอบรวม pk ไว้แล้ว)
         // refresh: ของเดิมยังใช้ได้ ก็คงไว้
-        keep = trigger === 'refresh' || state?.bucket === bucket;
+        keep = manual || trigger === 'refresh' || state?.bucket === bucket;
     }
     if (keep) return { setId: prev, state, rolled: false, changed: false, aware };
 
@@ -201,6 +205,7 @@ export function normalizeRule(rule) {
     }
     return {
         enabled: src.enabled !== false,
+        manual: src.manual === true,
         minutes,
         byDayNight: src.byDayNight === true,
         noRepeat: src.noRepeat !== false,
