@@ -49,7 +49,6 @@ html.kls-pal :where(#kls_settings, .kls-popup) :is(.text_pole, textarea, input):
     opacity: 0.7;
     margin-left: 3px;
 }
-.kls-vertag.kls-warn { color: var(--kls-p-warn, inherit); opacity: 1; }
 .kls-status {
     padding: 8px 10px;
     border: 1px solid var(--SmartThemeBorderColor);
@@ -84,9 +83,9 @@ html.kls-pal :where(#kls_settings, .kls-popup) :is(.text_pole, textarea, input):
     margin-top: -2px;
 }
 .kls-muted { color: var(--kls-p-muted, inherit); opacity: 0.9; }
-.kls-ver { opacity: 0.8; line-height: 1.4; }
-.kls-ver.kls-warn { color: var(--kls-p-warn, inherit); opacity: 1; }
-.kls-ver.kls-bad { color: var(--kls-p-danger, inherit); opacity: 1; }
+.kls-ver { opacity: 0.85; line-height: 1.4; overflow-wrap: anywhere; }
+.kls-ver .kls-stale { color: var(--kls-p-warn, inherit); font-weight: 600; }
+.kls-ver .kls-bad { color: var(--kls-p-danger, inherit); }
 .kls-diag { display: flex; flex-direction: column; gap: 6px; }
 /* display ของคลาสทับ [hidden] ของเบราว์เซอร์ → บังคับซ่อนคืน */
 :is(#kls_settings, .kls-mgr) [hidden] { display: none !important; }
