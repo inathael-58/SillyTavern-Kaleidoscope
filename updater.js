@@ -1,4 +1,4 @@
-// updater.js — ดึงเวอร์ชันล่าสุด: git pull ผ่าน ST → ล้างแคชไฟล์ของเราในเบราว์เซอร์ → โหลดหน้าใหม่
+// updater.js — ดึงเวอร์ชันล่าสุด: git pull ผ่าน ST → ดึงไฟล์ของเราใหม่ทับแคชเบราว์เซอร์ → (ui.js) โหลดหน้าใหม่
 import { ctx, EXT_URL, note } from './core.js';
 
 // ไฟล์ทั้งหมดที่เบราว์เซอร์ต้องโหลดใหม่ (เพิ่มไฟล์ใหม่ที่นี่ทุกครั้ง)
@@ -50,29 +50,31 @@ async function bustCache() {
     await Promise.all(FILES.map(f => fetch(`${EXT_URL}/${f}`, { cache: 'reload' }).catch(() => null)));
 }
 
+/** a ใหม่กว่า b จริงๆ (เวอร์ชันบนเซิร์ฟเวอร์เก่ากว่าที่รันอยู่ ไม่นับว่ามีตัวใหม่) */
+export const isNewer = (a, b) => !!a && compareVersions(a, b) > 0;
+
 /**
- * ดึงเวอร์ชันล่าสุด
+ * ดึงเวอร์ชันล่าสุด ตามลำดับ: git pull ผ่าน ST → ดึงไฟล์ทุกไฟล์ใหม่ทับแคช → อ่านเวอร์ชันที่ติดตั้งไว้
+ * (ผู้เรียกเป็นคนโหลดหน้าใหม่ ถ้า needsReload)
  * @param {string} running เวอร์ชันที่กำลังทำงานอยู่ในหน้านี้
- * @returns {Promise<{ pulled: boolean, commit: string, from: string, to: string, needsReload: boolean }>}
+ * @returns {Promise<{ pulled: boolean, commit: string, installed: string, needsReload: boolean }>}
  */
 export async function pullLatest(running) {
     let pulled = false;
     let commit = '';
+    let pullError = null;
     try {
         const res = await gitPull();
         pulled = !res.isUpToDate;
         commit = res.shortCommitHash || '';
     } catch (err) {
-        // ดึงจาก GitHub ไม่ได้ (ไม่ได้ติดตั้งด้วย git / ไม่มีเน็ต) → ยังล้างแคชได้ ถ้าไฟล์บนเครื่องใหม่กว่า
+        // ดึงจาก GitHub ไม่ได้ (ไม่ได้ติดตั้งด้วย git / ไม่มีเน็ต) → ยังโหลดไฟล์ที่ติดตั้งไว้ใหม่ได้ ถ้าใหม่กว่า
         note('warn', `update: ${err?.message || err}`);
-        await bustCache();
-        const to = await serverVersion().catch(() => '');
-        if (to && compareVersions(to, running) !== 0) {
-            return { pulled: false, commit: '', from: running, to, needsReload: true };
-        }
-        throw err;
+        pullError = err;
     }
     await bustCache();
-    const to = await serverVersion().catch(() => running);
-    return { pulled, commit, from: running, to, needsReload: pulled || compareVersions(to, running) !== 0 };
+    const installed = await serverVersion().catch(() => '');
+    const needsReload = pulled || isNewer(installed, running);
+    if (!needsReload && pullError) throw pullError;
+    return { pulled, commit, installed, needsReload };
 }

@@ -7,9 +7,9 @@ import {
     log, note, EXT_URL, bgModuleLoaded, bgInfo, themeOwnsBg,
 } from './core.js';
 import { newId, MINUTES, minutesOf } from './engine.js';
-import { pullLatest, serverVersion, compareVersions } from './updater.js';
+import { pullLatest, serverVersion, isNewer } from './updater.js';
 
-export const VERSION = '1.5.0';
+export const VERSION = '1.5.1'; // ให้ตรงกับ manifest.json
 
 const LEVEL_LABEL = { chat: 'แชทนี้', bot: 'บอทนี้', rule: 'กฎสุ่ม', preview: 'ลองใช้' };
 const TAG_LABEL = { '': 'ทั้งคู่', day: 'กลางวัน', night: 'กลางคืน' };
@@ -60,7 +60,7 @@ export function renderDrawer() {
 <div class="kls-settings" id="kls_settings">
   <div class="inline-drawer">
     <div class="inline-drawer-toggle inline-drawer-header">
-      <b>Kaleidoscope <small class="kls-vertag" id="kls_vertag">v${VERSION}</small></b>
+      <b>Kaleidoscope <small class="kls-vertag">v${VERSION}</small></b>
       <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
     </div>
     <div class="inline-drawer-content">
@@ -78,7 +78,7 @@ export function renderDrawer() {
         <div class="menu_button kls-btn" id="kls_update"><i class="fa-solid fa-cloud-arrow-down"></i><span>ดึงเวอร์ชันล่าสุด</span></div>
         <div class="menu_button kls-btn" id="kls_diag"><i class="fa-solid fa-stethoscope"></i><span>ตรวจสอบ</span></div>
       </div>
-      <small class="kls-ver" id="kls_ver" hidden></small>
+      <small class="kls-ver" id="kls_ver">ที่รันอยู่: <b>v${VERSION}</b></small>
       <div class="kls-diag" id="kls_diag_box" hidden>
         <textarea class="text_pole" id="kls_diag_text" rows="8" readonly></textarea>
         <div class="menu_button kls-btn" id="kls_diag_copy"><i class="fa-solid fa-copy"></i><span>คัดลอก</span></div>
@@ -143,26 +143,24 @@ export async function rerollNow() {
 }
 
 // ---------------------------------------------------------------- ดึงเวอร์ชัน
-/** บรรทัดสถานะเวอร์ชันใต้ปุ่ม ('' = ซ่อน) */
-function verLine(text, kind = '') {
-    $('#kls_ver')
-        .prop('hidden', !text)
-        .removeClass('kls-warn kls-bad')
-        .addClass(kind ? `kls-${kind}` : '')
-        .text(text);
+// ป้ายข้างชื่อ = เวอร์ชันที่หน้านี้รันอยู่จริงเสมอ · บรรทัดใต้ปุ่ม = รันอยู่ตัวไหน + ติดตั้งไว้ตัวไหน
+// (ST โหลดไฟล์ extension จาก URL เดิม เบราว์เซอร์/เว็บแอปบนโฮม iPhone เลยมักรันไฟล์เก่าค้างไว้)
+let installedVer = '';
+
+/** วาดบรรทัดเวอร์ชัน · extra = ข้อความต่อท้าย (กำลังทำอะไร / error) */
+function drawVer(extra = '', kind = '') {
+    const stale = isNewer(installedVer, VERSION);
+    const info = !installedVer ? ''
+        : stale ? ` · ติดตั้งไว้ <b>v${esc(installedVer)}</b> <span class="kls-stale">ยังไม่ได้โหลด กด “ดึงเวอร์ชันล่าสุด”</span>`
+        : ' · เป็นเวอร์ชันล่าสุดที่ติดตั้งไว้แล้ว';
+    const tail = extra ? `<br><span class="${kind ? `kls-${kind}` : ''}">${esc(extra)}</span>` : '';
+    $('#kls_ver').html(`ที่รันอยู่: <b>v${VERSION}</b>${info}${tail}`);
 }
 
 async function checkVersion() {
-    try {
-        const server = await serverVersion();
-        const stale = compareVersions(server, VERSION) !== 0;
-        $('#kls_vertag')
-            .toggleClass('kls-warn', stale)
-            .text(stale ? `v${VERSION} → v${server}` : `v${VERSION}`)
-            .attr('title', stale ? `บนเซิร์ฟเวอร์เป็น v${server} แล้ว แต่หน้านี้ยังรัน v${VERSION}` : '');
-        // แสดงแค่ในแผง ไม่เด้งแจ้งเตือน — ST แจ้งเรื่องอัปเดต extension เองตอนโหลดอยู่แล้ว
-        verLine(stale ? `ติดตั้ง v${server} ไว้แล้ว แต่หน้านี้ยังรัน v${VERSION} · โหลดหน้าใหม่เพื่อใช้ตัวใหม่` : '', stale ? 'warn' : '');
-    } catch { /* ออฟไลน์ ก็แสดงแค่เวอร์ชันที่รันอยู่ */ }
+    installedVer = await serverVersion().catch(() => ''); // ออฟไลน์ ก็แสดงแค่เวอร์ชันที่รันอยู่
+    // แสดงแค่ในแผง ไม่เด้งแจ้งเตือน — ST แจ้งเรื่องอัปเดต extension เองตอนโหลดอยู่แล้ว
+    drawVer();
 }
 
 let updating = false;
@@ -171,24 +169,31 @@ async function onUpdateClick() {
     updating = true;
     const $btn = $('#kls_update');
     $btn.addClass('disabled').find('span').text('กำลังดึง…');
-    verLine('กำลังตรวจหาเวอร์ชันใหม่…');
+    drawVer('กำลังดึงจาก GitHub…');
+    let reloading = false;
     try {
         const res = await pullLatest(VERSION);
+        installedVer = res.installed || installedVer;
         if (!res.needsReload) {
-            verLine(`v${VERSION} เป็นเวอร์ชันล่าสุดแล้ว`);
+            drawVer();
             toastr.success(`เป็นเวอร์ชันล่าสุดแล้ว (v${VERSION})`, 'Kaleidoscope');
             return;
         }
-        const what = `v${res.to}${res.commit ? ` (${res.commit})` : ''}`;
-        $('#kls_vertag').addClass('kls-warn').text(`v${VERSION} → v${res.to}`);
-        verLine(`ดึง ${what} แล้ว · โหลดหน้าใหม่เพื่อใช้งาน`, 'warn');
-        toastr.success(`ดึง ${what} แล้ว · โหลดหน้าใหม่เพื่อใช้งาน`, 'Kaleidoscope');
+        // มีตัวใหม่ → โหลดหน้าใหม่ให้เลย (ไฟล์ถูกดึงใหม่ทับแคชไว้แล้ว)
+        reloading = true;
+        const what = `v${installedVer || '?'}${res.commit ? ` (${res.commit})` : ''}`;
+        drawVer(`ได้ ${what} แล้ว · กำลังโหลดหน้าใหม่…`);
+        toastr.info(`ได้ ${what} แล้ว · กำลังโหลดหน้าใหม่…`, 'Kaleidoscope', { timeOut: 2000 });
+        try { ctx().saveSettingsDebounced?.flush?.(); } catch { /* ไม่มี flush ก็ข้าม */ }
+        setTimeout(() => location.reload(), 600);
     } catch (err) {
-        verLine(String(err?.message || err), 'bad');
+        drawVer(String(err?.message || err), 'bad');
         toastr.error(String(err?.message || err), 'Kaleidoscope');
     } finally {
-        updating = false;
-        $btn.removeClass('disabled').find('span').text('ดึงเวอร์ชันล่าสุด');
+        if (!reloading) {
+            updating = false;
+            $btn.removeClass('disabled').find('span').text('ดึงเวอร์ชันล่าสุด');
+        }
     }
 }
 
