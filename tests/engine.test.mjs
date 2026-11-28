@@ -83,13 +83,42 @@ test('old rules migrate: open mode → 30 min, interval hours → minutes', () =
     assert.equal(normalizeRule({ mode: 'interval', hours: 6 }).minutes, 360);
     assert.equal(normalizeRule({ minutes: 15, mode: 'interval', hours: 6 }).minutes, 15);
     assert.equal(normalizeRule({ minutes: 7 }).minutes, 30);
-    assert.deepEqual(Object.keys(normalizeRule({ mode: 'open' })).sort(), ['byDayNight', 'enabled', 'minutes', 'noRepeat']);
+    assert.deepEqual(Object.keys(normalizeRule({ mode: 'open' })).sort(), ['byDayNight', 'enabled', 'manual', 'minutes', 'noRepeat']);
     assert.deepEqual([...MINUTES], [15, 30, 60, 360, 720, 1440]);
 });
 
 test('hour-based buckets keep the old ids so nothing re-rolls after updating', () => {
     assert.equal(bucketFor(rule({ minutes: 360 }), at(7)), `h6:${Math.floor((at(7).getTime() - at(7).getTimezoneOffset() * 60000) / 60000 / 360)}`);
     assert.match(bucketFor(rule({ minutes: 15 }), at(7)), /^m15:/);
+});
+
+test('manual: keeps on open, tick (new slot) and day/night; changes only on force', () => {
+    const r = rule({ manual: true, minutes: 15 });
+    const ids = ['d1', 'd2', 'n1', 'n2'];
+    const o = (h, m, extra = {}) => opts({ rule: r, useTags: true, now: at(h, m), period: periodAt(DN, at(h, m)), ...extra });
+    const r1 = resolveIds(ids, null, o(17, 0, { rng: () => 0 }));
+    assert.equal(r1.setId, 'd1');
+    // ข้ามรอบ 15 นาที และข้ามเข้ากลางคืนแล้ว → ยังไม่เปลี่ยน
+    for (const trigger of ['open', 'tick', 'refresh']) {
+        const k = resolveIds(ids, r1.state, o(19, 0, { trigger, rng: () => 0.9 }));
+        assert.equal(k.rolled, false, trigger);
+        assert.equal(k.setId, 'd1', trigger);
+    }
+    // กดสุ่ม → สุ่มจากกลุ่มกลางคืนตามแท็ก
+    const f = resolveIds(ids, r1.state, o(19, 0, { trigger: 'force', rng: () => 0.9 }));
+    assert.equal(TAGS[f.setId], 'night');
+    // ไม่ตามกลางวัน/กลางคืน (กฎสุ่ม "ทุกเซท") → กดสุ่มได้จากทุกเซท
+    const all = resolveIds(ids, r1.state, o(19, 0, { useTags: false, trigger: 'force', rng: () => 0 }));
+    assert.equal(all.setId, 'd2');
+});
+
+test('manual: a set removed from the list is replaced even without pressing', () => {
+    const r = rule({ manual: true });
+    const r1 = resolveIds(['b1', 'b2'], null, opts({ rule: r, rng: () => 0 }));
+    const r2 = resolveIds(['b2'], r1.state, opts({ rule: r, trigger: 'refresh' }));
+    assert.equal(r2.setId, 'b2');
+    assert.equal(normalizeRule({ manual: 'yes' }).manual, false);
+    assert.equal(normalizeRule({ manual: true }).manual, true);
 });
 
 test('15 and 30 minute buckets', () => {

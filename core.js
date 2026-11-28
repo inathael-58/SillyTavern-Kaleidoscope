@@ -423,7 +423,7 @@ export const status = { level: '', setId: '', setName: '', mode: '', period: '',
 
 function modeOf() {
     const r = settings().rule;
-    return r ? String(minutesOf(r)) : '';
+    return r ? (r.manual ? 'manual' : String(minutesOf(r))) : '';
 }
 
 // ---------------------------------------------------------------- วาด blur ใหม่หลังเปลี่ยนธีม
